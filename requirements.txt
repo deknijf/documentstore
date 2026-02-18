@@ -1,0 +1,13 @@
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
+sqlalchemy==2.0.43
+pydantic==2.11.7
+pydantic-settings==2.10.1
+python-multipart==0.0.20
+boto3==1.40.12
+requests==2.32.4
+python-dateutil==2.9.0.post0
+Pillow==11.3.0
+PyMuPDF==1.26.4
+
+cryptography==44.0.1

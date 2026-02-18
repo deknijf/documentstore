@@ -1,0 +1,830 @@
+<!doctype html>
+<html lang="nl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Document Store</title>
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css?v=20260218f" />
+  </head>
+  <body>
+    <svg
+      width="0"
+      height="0"
+      aria-hidden="true"
+      focusable="false"
+      style="position:absolute;left:-9999px;top:-9999px;opacity:0;pointer-events:none"
+    >
+      <defs>
+        <linearGradient id="sidebarActiveGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#3da5ff"></stop>
+          <stop offset="100%" stop-color="#42cfa6"></stop>
+        </linearGradient>
+      </defs>
+    </svg>
+    <div id="loginView" class="login-view">
+      <div class="login-card">
+        <div class="login-logo-wrap">
+          <img src="/docstore_logo2.png" alt="Docstore logo" class="login-logo" />
+          <h1>Document Store</h1>
+        </div>
+        <p>Login om je documentomgeving te openen.</p>
+        <input id="emailInput" type="text" placeholder="Email/login" value="admin" />
+        <input id="passwordInput" type="password" placeholder="Wachtwoord" value="admin" />
+        <button id="loginBtn">Inloggen</button>
+        <p class="hint">Default admin: <code>admin / admin</code></p>
+      </div>
+    </div>
+
+    <div id="appView" class="app-view hidden">
+      <header class="masthead">
+        <div class="mast-image-b"></div>
+        <div class="mast-grid"></div>
+        <div class="masthead-inner">
+          <a id="mastHomeLink" class="mast-brand-wrap" href="#" aria-label="Ga naar dashboard">
+            <img src="/docstore_logo2.png" alt="Docstore logo" class="mast-logo" />
+            <div class="mast-brand">doc<span>store</span></div>
+          </a>
+          <div class="mast-search-wrap">
+            <input
+              id="searchInput"
+              class="mast-search"
+              type="search"
+              placeholder="Zoek in alle documenten"
+            />
+            <div id="searchSuggest" class="search-suggest hidden"></div>
+          </div>
+          <div id="userInfo" class="mast-user" role="button" tabindex="0"></div>
+        </div>
+      </header>
+
+      <div class="workspace">
+        <aside id="sidebar" class="sidebar">
+          <div class="brand">
+            <p class="section-title">Document center</p>
+          </div>
+          <nav class="menu">
+            <button class="menu-item active" data-tab="dashboard"><span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5V21a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1V10.5Z"/></svg></span><span class="menu-label">Dashboard</span></button>
+            <button class="menu-item" data-tab="documents"><span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 2h8l5 5v13a2 2 0 0 1-2 2H7a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3Zm8 1.5V8h4.5"/></svg></span><span class="menu-label">Documenten</span></button>
+            <button class="menu-item" data-tab="labels"><span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 12 9-9h7l2 2v7l-9 9-9-9Zm12-5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"/></svg></span><span class="menu-label">Labels</span></button>
+            <button class="menu-item" data-tab="senders"><span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18v14H3V5Zm3 2 6 5 6-5H6Zm13 10V8l-7 5.8L5 8v9h14Z"/></svg></span><span class="menu-label">Afzenders</span></button>
+            <button class="menu-item" data-tab="categories"><span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h8v5H3V6Zm10 0h8v5h-8V6ZM3 13h8v5H3v-5Zm10 0h8v5h-8v-5Z"/></svg></span><span class="menu-label">Categorieën</span></button>
+            <button class="menu-item" data-tab="trash"><span class="menu-icon"><svg viewBox="0 0 64 64" aria-hidden="true"><rect x="20" y="2" width="24" height="10" rx="5" ry="5"></rect><rect x="3" y="10" width="58" height="12" rx="6" ry="6"></rect><path d="M8 24h48l-4 31c-.5 4.8-4.6 8.5-9.4 8.5H21.4c-4.8 0-8.9-3.7-9.4-8.5L8 24Z"></path><rect x="21" y="31" width="5" height="25" rx="2.5" ry="2.5"></rect><rect x="29.5" y="31" width="5" height="25" rx="2.5" ry="2.5"></rect><rect x="38" y="31" width="5" height="25" rx="2.5" ry="2.5"></rect></svg></span><span class="menu-label">Prullenbak</span></button>
+            <div id="bankMenuWrap" class="admin-wrap">
+              <p class="section-title">Bank</p>
+              <button id="menuBankApi" class="menu-item" data-tab="bank-api"><span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 2 7v2h20V7L12 2Zm-8 9h2v7H4v-7Zm5 0h2v7H9v-7Zm5 0h2v7h-2v-7Zm5 0h2v7h-2v-7ZM2 20h20v2H2v-2Z"/></svg></span><span class="menu-label">API - XS2A</span></button>
+              <button class="menu-item" data-tab="bank-budget"><span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4V4Zm2 12h2V8H6v8Zm5 0h2V6h-2v10Zm5 0h2v-5h-2v5Z"/></svg></span><span class="menu-label">Budget</span></button>
+              <button class="menu-item" data-tab="bank-import"><span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a1 1 0 0 1 1 1v8.6l2.3-2.3a1 1 0 1 1 1.4 1.4l-4 4a1 1 0 0 1-1.4 0l-4-4a1 1 0 1 1 1.4-1.4L11 12.6V4a1 1 0 0 1 1-1ZM4 19a1 1 0 0 1 1-1h14a1 1 0 1 1 0 2H5a1 1 0 0 1-1-1Z"/></svg></span><span class="menu-label">Import CSV</span></button>
+              <button class="menu-item" data-tab="bank-settings"><span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a2 2 0 0 1 2 2v1.1a7.5 7.5 0 0 1 1.5.6l.8-.8a2 2 0 1 1 2.8 2.8l-.8.8c.2.5.4 1 .6 1.5H20a2 2 0 1 1 0 4h-1.1a7.5 7.5 0 0 1-.6 1.5l.8.8a2 2 0 1 1-2.8 2.8l-.8-.8a7.5 7.5 0 0 1-1.5.6V20a2 2 0 1 1-4 0v-1.1a7.5 7.5 0 0 1-1.5-.6l-.8.8a2 2 0 1 1-2.8-2.8l.8-.8a7.5 7.5 0 0 1-.6-1.5H4a2 2 0 1 1 0-4h1.1a7.5 7.5 0 0 1 .6-1.5l-.8-.8a2 2 0 1 1 2.8-2.8l.8.8a7.5 7.5 0 0 1 1.5-.6V4a2 2 0 0 1 2-2Zm0 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"/></svg></span><span class="menu-label">Settings</span></button>
+            </div>
+            <div id="adminMenuWrap" class="admin-wrap hidden">
+              <p class="section-title">Admin</p>
+              <button class="menu-item" data-tab="admin-users"><span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5Zm0 2c-5 0-9 2.2-9 5v2h18v-2c0-2.8-4-5-9-5Z"/></svg></span><span class="menu-label">Gebruikers</span></button>
+              <button class="menu-item" data-tab="admin-groups"><span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 11a3 3 0 1 0-3-3 3 3 0 0 0 3 3Zm10 0a3 3 0 1 0-3-3 3 3 0 0 0 3 3ZM7 13c-3.3 0-6 1.6-6 3.5V20h9v-3.5C10 14.6 9 13.6 7 13Zm10 0c-2 0-3 .6-3 3.5V20h9v-3.5c0-1.9-2.7-3.5-6-3.5ZM12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Zm0 2c-2.7 0-5 1.2-5 2.8V20h10v-3.2c0-1.6-2.3-2.8-5-2.8Z"/></svg></span><span class="menu-label">Groepen</span></button>
+              <button class="menu-item" data-tab="admin-integrations"><span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 2 .7 2.1a8 8 0 0 1 1.8.8l2-1 1.5 2.6-1.8 1.3a8 8 0 0 1 0 2l1.8 1.3-1.5 2.6-2-1a8 8 0 0 1-1.8.8L14.5 22h-3l-.7-2.1a8 8 0 0 1-1.8-.8l-2 1-1.5-2.6 1.8-1.3a8 8 0 0 1 0-2L5.5 9l1.5-2.6 2 1a8 8 0 0 1 1.8-.8L11.5 2h3ZM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"/></svg></span><span class="menu-label">Integraties</span></button>
+              <button class="menu-item" data-tab="admin-settings"><span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a2 2 0 0 1 2 2v1.1a7.5 7.5 0 0 1 1.5.6l.8-.8a2 2 0 1 1 2.8 2.8l-.8.8c.2.5.4 1 .6 1.5H20a2 2 0 1 1 0 4h-1.1a7.5 7.5 0 0 1-.6 1.5l.8.8a2 2 0 1 1-2.8 2.8l-.8-.8a7.5 7.5 0 0 1-1.5.6V20a2 2 0 1 1-4 0v-1.1a7.5 7.5 0 0 1-1.5-.6l-.8.8a2 2 0 1 1-2.8-2.8l.8-.8a7.5 7.5 0 0 1-.6-1.5H4a2 2 0 1 1 0-4h1.1a7.5 7.5 0 0 1 .6-1.5l-.8-.8a2 2 0 1 1 2.8-2.8l.8.8a7.5 7.5 0 0 1 1.5-.6V4a2 2 0 0 1 2-2Zm0 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"/></svg></span><span class="menu-label">Settings</span></button>
+            </div>
+          </nav>
+          <button id="logoutBtn" class="logout">Logout</button>
+        </aside>
+
+        <div id="mobileNavBackdrop" class="mobile-backdrop hidden"></div>
+
+        <main class="content">
+        <section class="topbar">
+          <div class="topbar-left">
+            <button id="mobileMenuBtn" class="icon-menu ghost" aria-label="Menu openen/sluiten" title="Menu">☰</button>
+            <h1 id="pageTitle">Dashboard</h1>
+            <button id="topBulkBtn" class="ghost btn-action top-bulk-btn" type="button" disabled>Verwijder</button>
+            <button id="checkBankBtn" class="btn-action bank-check-btn hidden" type="button">CHECK BANK</button>
+            <button id="ocrAiBtn" class="ghost btn-action top-bulk-btn hidden" type="button">OCR &amp; AI</button>
+            <button id="refreshBtn" class="icon-refresh" aria-label="Vernieuwen" title="Vernieuwen">↻</button>
+          </div>
+        </section>
+        <div id="detailOverdueAlert" class="detail-overdue-alert hidden"></div>
+
+        <section id="tab-dashboard" class="tab-panel active">
+          <div class="panel">
+            <div class="facet-head">
+              <h3>Faceted Search</h3>
+              <div class="facet-head-actions">
+                <button id="facetToggleBtn" class="ghost facet-toggle-btn" type="button" aria-label="Filters uitklappen" title="Filters uitklappen">▾</button>
+                <button id="clearFacetsBtn" class="ghost btn-action" type="button">Filters wissen</button>
+              </div>
+            </div>
+            <div id="facetLayout" class="facet-layout hidden">
+              <section class="facet-section facet-full">
+                <h4>Status</h4>
+                <div id="facetStatus" class="radio-row">
+                  <label><input type="radio" name="fStatusRadio" value="" checked /> Alle</label>
+                  <label><input type="radio" name="fStatusRadio" value="uploaded" /> Uploaded</label>
+                  <label><input type="radio" name="fStatusRadio" value="processing" /> Processing</label>
+                  <label><input type="radio" name="fStatusRadio" value="ready" /> Ready</label>
+                  <label><input type="radio" name="fStatusRadio" value="failed" /> Failed</label>
+                </div>
+              </section>
+
+              <section class="facet-section facet-half">
+                <h4>Bedrag</h4>
+                <div class="range-row">
+                  <input id="fMinAmountRange" type="range" min="0" max="10000" step="10" value="0" />
+                  <input id="fMaxAmountRange" type="range" min="0" max="10000" step="10" value="10000" />
+                </div>
+                <div class="range-values">
+                  <input id="fMinAmount" type="number" step="0.01" placeholder="Min bedrag" />
+                  <span>tot</span>
+                  <input id="fMaxAmount" type="number" step="0.01" placeholder="Max bedrag" />
+                </div>
+              </section>
+
+              <section class="facet-section facet-half">
+                <h4>Documentdatum</h4>
+                <div class="range-values">
+                  <input id="fDocDateFrom" type="date" />
+                  <span>tot</span>
+                  <input id="fDocDateTo" type="date" />
+                </div>
+              </section>
+
+              <section class="facet-section facet-half">
+                <h4>Due Date</h4>
+                <div class="range-values">
+                  <input id="fDueDateFrom" type="date" />
+                  <span>tot</span>
+                  <input id="fDueDateTo" type="date" />
+                </div>
+              </section>
+
+              <section class="facet-section facet-quarter">
+                <h4>Categorie</h4>
+                <div id="facetCategories" class="check-grid"></div>
+              </section>
+
+              <section class="facet-section facet-quarter">
+                <h4>Afzender</h4>
+                <div id="facetIssuers" class="check-grid"></div>
+              </section>
+
+              <section class="facet-section facet-quarter">
+                <h4>Labels</h4>
+                <div id="facetLabels" class="check-grid"></div>
+              </section>
+
+              <section class="facet-section facet-quarter">
+                <h4>Betaald</h4>
+                <div id="facetPaid" class="radio-col">
+                  <label><input type="radio" name="fPaidRadio" value="" checked /> Alle</label>
+                  <label><input type="radio" name="fPaidRadio" value="paid" /> Betaald</label>
+                  <label><input type="radio" name="fPaidRadio" value="unpaid" /> Onbetaald</label>
+                </div>
+              </section>
+            </div>
+          </div>
+          <div id="dashboardCards" class="cards"></div>
+          <div id="dashboardPager" class="pager"></div>
+        </section>
+
+        <section id="tab-profile" class="tab-panel">
+          <div class="panel profile-panel">
+            <h3>Mijn profiel</h3>
+            <div class="grid profile-form">
+              <div class="form-field profile-span-all avatar-row">
+                <label>Avatar</label>
+                <div class="avatar-controls">
+                  <img id="selfAvatarPreview" class="self-avatar-preview hidden" alt="Avatar preview" />
+                  <input id="selfAvatarInput" class="hidden" type="file" accept="image/png,image/jpeg,image/jpg,image/webp" />
+                  <button id="uploadAvatarBtn" class="ghost btn-action" type="button">Avatar uploaden</button>
+                </div>
+              </div>
+              <div class="form-field">
+                <label for="selfName">Naam</label>
+                <input id="selfName" type="text" placeholder="Naam" />
+              </div>
+              <div class="form-field">
+                <label for="selfEmail">Email</label>
+                <input id="selfEmail" type="text" placeholder="john.doe@example.com" />
+              </div>
+              <div class="form-field profile-span-all">
+                <label for="selfPassword">Wachtwoord</label>
+                <input id="selfPassword" type="password" placeholder="Nieuw wachtwoord (optioneel)" />
+              </div>
+              <button id="saveSelfBtn" class="btn-action" type="button">Opslaan</button>
+            </div>
+          </div>
+        </section>
+
+        <section id="tab-document-detail" class="tab-panel">
+          <div class="panel detail-layout">
+            <aside class="detail-form">
+              <div class="detail-head">
+                <h3 id="detailTitle">Document details</h3>
+                <button id="detailBackBtn" class="ghost btn-action" type="button">Terug</button>
+              </div>
+              <div class="grid detail-fields">
+                <div class="form-field">
+                  <label for="dSubject">Titel / onderwerp</label>
+                  <input id="dSubject" type="text" />
+                </div>
+                <div class="form-field">
+                  <label for="dIssuer">Afzender</label>
+                  <input id="dIssuer" type="text" />
+                </div>
+                <div class="form-field">
+                  <label for="dCategory">Categorie</label>
+                  <select id="dCategory"></select>
+                </div>
+                <div class="form-field">
+                  <label for="dDocumentDate">Documentdatum</label>
+                  <input id="dDocumentDate" type="date" />
+                </div>
+                <div class="form-field" id="fieldDueDateWrap">
+                  <label for="dDueDate">Due date</label>
+                  <input id="dDueDate" type="date" />
+                </div>
+                <div class="form-field">
+                  <label for="dAmountWithCurrency">Bedrag (incl valuta)</label>
+                  <input id="dAmountWithCurrency" type="text" placeholder="EUR 102,40" />
+                </div>
+                <div class="form-field" id="fieldIbanWrap">
+                  <label for="dIban">IBAN</label>
+                  <input id="dIban" type="text" />
+                </div>
+                <div class="form-field" id="fieldStructuredRefWrap">
+                  <label for="dStructuredRef">Gestructureerde mededeling</label>
+                  <input id="dStructuredRef" type="text" />
+                </div>
+                <div class="form-field hidden" id="fieldLineItemsWrap">
+                  <label for="dLineItems">Artikels (lijn per lijn)</label>
+                  <div id="lineItemsRows" class="line-items-rows"></div>
+                  <button id="addLineItemBtn" class="ghost btn-action" type="button">Artikel toevoegen</button>
+                </div>
+                <div class="form-field hidden" id="dynamicFieldsWrap">
+                  <label>Aangepaste velden</label>
+                  <div id="dynamicDetailFields" class="dynamic-fields"></div>
+                </div>
+                <div class="form-field">
+                  <label for="dLabels">Labels</label>
+                  <select id="dLabels" multiple></select>
+                </div>
+                <div class="form-field">
+                  <label><input id="dPaid" type="checkbox" /> Betaald</label>
+                </div>
+                <div class="form-field">
+                  <label for="dPaidOn">Betaald op</label>
+                  <input id="dPaidOn" type="date" />
+                </div>
+                <div class="form-field">
+                  <label for="dRemark">Opmerking</label>
+                  <textarea id="dRemark" rows="4" placeholder="Vrije opmerking of suggestie voor nieuwe categorie"></textarea>
+                </div>
+              </div>
+              <div class="detail-actions">
+                <small>Wijzigingen worden automatisch opgeslagen</small>
+                <button id="detailDownloadBtn" class="ghost btn-action" type="button">Download</button>
+              </div>
+            </aside>
+            <section class="detail-viewer">
+              <div class="viewer-tabs">
+                <button id="viewerTabOriginal" class="viewer-tab active" type="button">Origineel document</button>
+                <button id="viewerTabOcr" class="viewer-tab" type="button">OCR tekst</button>
+              </div>
+              <div id="detailViewerWrap" class="viewer-wrap viewer-pane active">
+                <p>Geen document geladen.</p>
+              </div>
+              <div id="detailOcrWrap" class="viewer-wrap viewer-pane">
+                <pre id="detailOcrText">Geen OCR tekst beschikbaar.</pre>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section id="tab-documents" class="tab-panel">
+          <div class="panel">
+            <h3>Upload document</h3>
+            <div class="upload-row upload-row-docs-simple">
+              <div id="dropzone" class="dropzone inline-dropzone">Sleep PDF of afbeelding(en) hierheen</div>
+              <label class="file-btn btn-action" for="fileInput">Bestanden kiezen</label>
+              <label class="file-btn btn-action mobile-only" for="cameraInput">Maak foto</label>
+              <input id="fileInput" type="file" accept="application/pdf,image/*" multiple hidden />
+              <input id="cameraInput" type="file" accept="image/*" capture="environment" hidden />
+            </div>
+          </div>
+          <div id="documentCards" class="cards"></div>
+          <div id="documentsPager" class="pager"></div>
+        </section>
+
+        <section id="tab-trash" class="tab-panel">
+          <div id="trashCards" class="cards"></div>
+        </section>
+
+        <section id="tab-labels" class="tab-panel">
+          <div class="panel">
+            <h3>Label toevoegen</h3>
+            <div class="upload-row">
+              <input id="labelName" type="text" placeholder="Label naam" />
+              <select id="labelGroup"></select>
+              <button id="addLabelBtn" class="btn-action">Label toevoegen</button>
+            </div>
+          </div>
+          <div id="labelsList" class="panel"></div>
+        </section>
+
+        <section id="tab-senders" class="tab-panel">
+          <div class="panel split-panel">
+            <aside class="split-list-wrap">
+              <h3>Afzenders</h3>
+              <div id="senderList" class="split-list"></div>
+            </aside>
+            <section>
+              <h3>Documenten van afzender</h3>
+              <div id="senderDocs" class="cards compact-cards"></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="tab-categories" class="tab-panel">
+          <div class="panel split-panel">
+            <aside class="split-list-wrap">
+              <h3>Categorieën</h3>
+              <div class="upload-row category-create-row">
+                <input id="newCategoryName" type="text" placeholder="Nieuwe categorie" />
+                <button id="createCategoryBtn" class="btn-action" type="button">Categorie toevoegen</button>
+              </div>
+              <div id="categoryList" class="split-list"></div>
+              <div id="categoryEditor" class="category-editor hidden">
+                <h4 id="categoryEditorTitle">Categorie aanpassen</h4>
+                <div class="form-field">
+                  <label for="editCategoryName">Naam</label>
+                  <input id="editCategoryName" type="text" />
+                </div>
+                <div class="form-field">
+                  <label for="editCategoryPrompt">AI prompt</label>
+                  <textarea id="editCategoryPrompt" rows="5"></textarea>
+                </div>
+                <div class="form-field">
+                  <label>Parameters</label>
+                  <div class="param-add-row">
+                    <input id="editCategoryParamInput" type="text" placeholder="Nieuwe parameter (bv. btw_nummer)" />
+                    <button id="addCategoryParamBtn" class="pick-edit" type="button" title="Parameter toevoegen" aria-label="Parameter toevoegen">+</button>
+                  </div>
+                  <div id="editCategoryFields" class="param-list"></div>
+                </div>
+                <div class="form-field">
+                  <label><input id="editCategoryPaidDefault" type="checkbox" /> Default betaald</label>
+                </div>
+                <button id="saveCategoryEditBtn" class="btn-action" type="button">Opslaan</button>
+              </div>
+            </aside>
+            <section>
+              <h3>Documenten in categorie</h3>
+              <div id="categoryDocs" class="cards compact-cards"></div>
+              <div id="categoryPager" class="pager"></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="tab-admin-users" class="tab-panel">
+          <div class="panel">
+            <h3>Nieuwe gebruiker</h3>
+            <div class="grid admin-form">
+              <div class="form-field">
+                <label for="newUserName">Naam</label>
+                <input id="newUserName" type="text" placeholder="Naam" />
+              </div>
+              <div class="form-field">
+                <label for="newUserEmail">Email</label>
+                <input id="newUserEmail" type="text" placeholder="john.doe@example.com" />
+              </div>
+              <div class="form-field">
+                <label for="newUserPassword">Wachtwoord</label>
+                <input id="newUserPassword" type="password" placeholder="Wachtwoord" />
+              </div>
+              <div class="form-field">
+                <label for="newUserGroups">Groep</label>
+                <select id="newUserGroups"></select>
+              </div>
+              <button id="createUserBtn" class="btn-action">Gebruiker aanmaken</button>
+            </div>
+          </div>
+          <div class="panel">
+            <h3>Beschikbare gebruikers</h3>
+            <div id="usersList" class="users-admin-layout">
+              <div id="usersTiles" class="users-tiles"></div>
+              <div id="userDetail" class="user-detail hidden">
+                <h4 id="userDetailTitle">Gebruiker detail</h4>
+                <div class="grid admin-form">
+                  <div class="form-field">
+                    <label for="editUserName">Naam</label>
+                    <input id="editUserName" type="text" placeholder="Naam" />
+                  </div>
+                  <div class="form-field">
+                    <label for="editUserEmail">Email</label>
+                    <input id="editUserEmail" type="text" placeholder="john.doe@example.com" />
+                  </div>
+                  <div class="form-field">
+                    <label for="editUserPassword">Wachtwoord</label>
+                    <input id="editUserPassword" type="password" placeholder="Nieuw wachtwoord" />
+                  </div>
+                  <div class="form-field">
+                    <label for="editUserGroup">Groep</label>
+                    <select id="editUserGroup"></select>
+                  </div>
+                </div>
+                <div class="user-detail-actions">
+                  <button id="deleteUserDetailBtn" class="ghost btn-action" type="button">Verwijder</button>
+                  <button id="saveUserDetailBtn" class="ghost btn-action" type="button">Opslaan</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="tab-admin-groups" class="tab-panel">
+          <div class="panel">
+            <h3>Nieuwe groep</h3>
+            <div class="grid admin-form">
+              <div class="form-field">
+                <label for="newGroupName">Naam</label>
+                <input id="newGroupName" type="text" placeholder="Groepsnaam" />
+              </div>
+              <button id="createGroupBtn" class="btn-action">Groep aanmaken</button>
+            </div>
+          </div>
+          <div class="panel">
+            <h3>Beschikbare groepen</h3>
+            <div id="groupsList" class="groups-tiles"></div>
+          </div>
+        </section>
+
+        <section id="tab-admin-integrations" class="tab-panel">
+          <div class="panel">
+            <h3>Integraties</h3>
+            <div class="integration-block">
+              <h4>AWS Textract</h4>
+              <div class="grid admin-form">
+                <div class="form-field">
+                  <label for="iAwsRegion">Region</label>
+                  <input id="iAwsRegion" type="text" placeholder="bv. eu-west-1" />
+                </div>
+                <div class="form-field">
+                  <label for="iAwsAccessKey">Access key</label>
+                  <input id="iAwsAccessKey" type="text" placeholder="AWS access key id" />
+                </div>
+                <div class="form-field">
+                  <label for="iAwsSecretKey">Secret key (write-only)</label>
+                  <input id="iAwsSecretKey" type="password" placeholder="nieuw invullen om te wijzigen" />
+                </div>
+                <div id="iAwsSecretStatus" class="secret-status"></div>
+              </div>
+            </div>
+            <div class="integration-block">
+              <h4>LLM Vision</h4>
+              <div class="grid admin-form">
+                <div class="form-field">
+                  <label for="iAiProvider">AI provider</label>
+                  <select id="iAiProvider">
+                    <option value="openrouter">openrouter</option>
+                    <option value="openai">openai</option>
+                    <option value="google">google</option>
+                  </select>
+                </div>
+                <div class="form-field">
+                  <label for="iLlmApiKey">API key (write-only)</label>
+                  <input id="iLlmApiKey" type="password" placeholder="nieuw invullen om te wijzigen" />
+                </div>
+                <div class="form-field">
+                  <label for="iLlmModel">Parsing model</label>
+                  <input id="iLlmModel" type="text" placeholder="model voor metadata extractie" />
+                </div>
+                <div class="form-field">
+                  <label for="iLlmOcrModel">Vision OCR model</label>
+                  <input id="iLlmOcrModel" type="text" placeholder="model voor OCR transcribe" />
+                </div>
+                <div id="iLlmSecretStatus" class="secret-status"></div>
+              </div>
+            </div>
+            <div class="integration-block">
+              <h4>Default OCR Provider</h4>
+              <div class="grid admin-form">
+                <div class="form-field">
+                  <label for="iDefaultOcr">Provider</label>
+                  <select id="iDefaultOcr">
+                    <option value="textract">AWS Textract</option>
+                    <option value="llm_vision">LLM Vision</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div class="integration-block">
+              <h4>Ingest from mail</h4>
+              <div class="grid admin-form">
+                <div class="form-field">
+                  <label for="iMailIngestEnabled">Actief</label>
+                  <select id="iMailIngestEnabled">
+                    <option value="false">Uit</option>
+                    <option value="true">Aan</option>
+                  </select>
+                </div>
+                <div class="form-field">
+                  <label for="iMailUseSsl">IMAP SSL</label>
+                  <select id="iMailUseSsl">
+                    <option value="true">Ja (aanbevolen)</option>
+                    <option value="false">Nee</option>
+                  </select>
+                </div>
+                <div class="form-field">
+                  <label for="iMailHost">IMAP host</label>
+                  <input id="iMailHost" type="text" placeholder="imap.provider.tld" />
+                </div>
+                <div class="form-field">
+                  <label for="iMailPort">IMAP port</label>
+                  <input id="iMailPort" type="number" min="1" placeholder="993" />
+                </div>
+                <div class="form-field">
+                  <label for="iMailUsername">Gebruikersnaam</label>
+                  <input id="iMailUsername" type="text" placeholder="mailbox login" />
+                </div>
+                <div class="form-field">
+                  <label for="iMailPassword">Wachtwoord / app password (write-only)</label>
+                  <input id="iMailPassword" type="password" placeholder="nieuw invullen om te wijzigen" />
+                </div>
+                <div class="form-field">
+                  <label for="iMailFolder">Mailbox folder</label>
+                  <input id="iMailFolder" type="text" placeholder="INBOX" />
+                </div>
+                <div class="form-field">
+                  <label for="iMailFrequencyMinutes">Frequentie (minuten)</label>
+                  <input id="iMailFrequencyMinutes" type="number" min="0" step="1" placeholder="0 = uit" />
+                </div>
+                <div class="form-field">
+                  <label for="iMailGroup">Ingest groep</label>
+                  <select id="iMailGroup"></select>
+                </div>
+                <div class="form-field">
+                  <label>Attachment type(s)</label>
+                  <div id="mailAttachmentTypeEditor" class="bank-token-editor">
+                    <input id="iMailAttachmentTypes" class="bank-token-input" type="text" placeholder="Typ type(s), komma om toe te voegen" />
+                  </div>
+                </div>
+                <div class="form-field">
+                  <label>&nbsp;</label>
+                  <button id="runMailIngestBtn" class="ghost btn-action" type="button">Nu ophalen</button>
+                </div>
+                <div id="iMailPasswordStatus" class="secret-status"></div>
+              </div>
+            </div>
+            <div id="bankAggregatorBlock" class="integration-block">
+              <h4>Bank Aggregator (read-only)</h4>
+              <div class="grid admin-form">
+                <div class="form-field">
+                  <label for="iBankProvider">Actieve bank provider</label>
+                  <select id="iBankProvider">
+                    <option value="vdk">VDK</option>
+                    <option value="kbc">KBC</option>
+                    <option value="bnp">BNP Paribas Fortis</option>
+                  </select>
+                </div>
+              </div>
+              <div id="bankProviderVdkBlock" class="integration-block integration-subblock">
+                <h4>VDK</h4>
+                <div class="grid admin-form">
+                  <div class="form-field">
+                    <label for="iVdkBaseUrl">Base URL</label>
+                    <input id="iVdkBaseUrl" type="text" placeholder="https://.../xs2a" />
+                  </div>
+                  <div class="form-field">
+                    <label for="iVdkClientId">Client ID</label>
+                    <input id="iVdkClientId" type="text" placeholder="VDK client id" />
+                  </div>
+                  <div class="form-field">
+                    <label for="iVdkApiKey">API key / Bearer token (write-only)</label>
+                    <input id="iVdkApiKey" type="password" placeholder="nieuw invullen om te wijzigen" />
+                  </div>
+                  <div class="form-field">
+                    <label for="iVdkPassword">Password (write-only)</label>
+                    <input id="iVdkPassword" type="password" placeholder="nieuw invullen om te wijzigen" />
+                  </div>
+                  <div id="iVdkApiKeyStatus" class="secret-status"></div>
+                  <div id="iVdkPasswordStatus" class="secret-status"></div>
+                </div>
+              </div>
+              <div id="bankProviderKbcBlock" class="integration-block integration-subblock">
+                <h4>KBC</h4>
+                <div class="grid admin-form">
+                  <div class="form-field">
+                    <label for="iKbcBaseUrl">Base URL</label>
+                    <input id="iKbcBaseUrl" type="text" placeholder="https://.../xs2a" />
+                  </div>
+                  <div class="form-field">
+                    <label for="iKbcClientId">Client ID</label>
+                    <input id="iKbcClientId" type="text" placeholder="KBC client id" />
+                  </div>
+                  <div class="form-field">
+                    <label for="iKbcApiKey">API key / Bearer token (write-only)</label>
+                    <input id="iKbcApiKey" type="password" placeholder="nieuw invullen om te wijzigen" />
+                  </div>
+                  <div class="form-field">
+                    <label for="iKbcPassword">Password (write-only)</label>
+                    <input id="iKbcPassword" type="password" placeholder="nieuw invullen om te wijzigen" />
+                  </div>
+                  <div id="iKbcApiKeyStatus" class="secret-status"></div>
+                  <div id="iKbcPasswordStatus" class="secret-status"></div>
+                </div>
+              </div>
+              <div id="bankProviderBnpBlock" class="integration-block integration-subblock">
+                <h4>BNP Paribas Fortis</h4>
+                <div class="grid admin-form">
+                  <div class="form-field">
+                    <label for="iBnpBaseUrl">Base URL</label>
+                    <input id="iBnpBaseUrl" type="text" placeholder="https://.../xs2a" />
+                  </div>
+                  <div class="form-field">
+                    <label for="iBnpClientId">Client ID</label>
+                    <input id="iBnpClientId" type="text" placeholder="BNP client id" />
+                  </div>
+                  <div class="form-field">
+                    <label for="iBnpApiKey">API key / Bearer token (write-only)</label>
+                    <input id="iBnpApiKey" type="password" placeholder="nieuw invullen om te wijzigen" />
+                  </div>
+                  <div class="form-field">
+                    <label for="iBnpPassword">Password (write-only)</label>
+                    <input id="iBnpPassword" type="password" placeholder="nieuw invullen om te wijzigen" />
+                  </div>
+                  <div id="iBnpApiKeyStatus" class="secret-status"></div>
+                  <div id="iBnpPasswordStatus" class="secret-status"></div>
+                </div>
+              </div>
+            </div>
+            <button id="saveIntegrationsBtn" class="btn-action">Opslaan</button>
+          </div>
+        </section>
+
+        <section id="tab-bank-api" class="tab-panel">
+          <div class="panel">
+            <h3>API - XS2A</h3>
+            <div class="grid admin-form">
+              <div id="newBankProviderWrap" class="form-field">
+                <label for="newBankAccountName">Naam rekening</label>
+                <input id="newBankAccountName" type="text" placeholder="Bijv. Zichtrekening" />
+              </div>
+              <div id="newBankExternalIdWrap" class="form-field">
+                <label for="newBankProvider">Provider</label>
+                <select id="newBankProvider">
+                  <option value="vdk">VDK</option>
+                  <option value="kbc">KBC</option>
+                  <option value="bnp">BNP Paribas Fortis</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label for="newBankAccountIban">IBAN</label>
+                <input id="newBankAccountIban" type="text" placeholder="BE..." />
+              </div>
+              <div class="form-field">
+                <label for="newBankExternalId">External account id</label>
+                <input id="newBankExternalId" type="text" placeholder="resourceId/accountId" />
+              </div>
+              <div id="bankSyncActions" class="bank-actions-inline">
+                <button id="addBankAccountBtn" class="btn-action" type="button">Rekening toevoegen</button>
+                <button id="syncBankAccountsBtn" class="ghost btn-action" type="button">Rekeningen ophalen (actieve provider)</button>
+              </div>
+            </div>
+          </div>
+          <div class="panel split-panel">
+            <aside class="split-list-wrap">
+              <h3>Zichtrekeningen</h3>
+              <div id="bankAccountsList" class="split-list"></div>
+            </aside>
+            <section>
+              <div class="bank-transactions-head">
+                <h3>Transacties</h3>
+                <button id="syncBankTransactionsBtn" class="ghost btn-action" type="button">Transacties ophalen</button>
+              </div>
+              <div id="bankTransactionsList" class="bank-transactions-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="tab-bank-budget" class="tab-panel">
+          <div class="panel">
+            <div class="budget-head">
+              <h3>Budget analyse</h3>
+              <div class="bank-actions-inline">
+                <button id="budgetRefreshBtn" class="ghost btn-action" type="button">Refresh</button>
+                <button id="budgetAnalyzeBtn" class="btn-action" type="button">Analyze</button>
+              </div>
+            </div>
+            <div id="budgetAnalyzeProgress" class="budget-analyze-progress hidden"></div>
+            <p class="muted">Analyse op basis van alle CSV transacties + mappings uit Bank Settings.</p>
+            <div class="budget-layout">
+              <section class="budget-facets budget-facets-inline">
+                <div class="facet-section facet-line">
+                  <h4>Jaren</h4>
+                  <div id="budgetYearFacet" class="checks checks-inline"></div>
+                </div>
+                <div class="facet-section facet-line">
+                  <h4>Maanden</h4>
+                  <div id="budgetMonthFacet" class="checks checks-inline"></div>
+                </div>
+                <div class="budget-filters-actions">
+                  <button id="budgetClearFiltersBtn" class="ghost btn-action" type="button">Filters wissen</button>
+                </div>
+              </section>
+              <section class="budget-main">
+                <div id="budgetSummaryCards" class="budget-summary-cards"></div>
+                <div id="budgetPromptInfo" class="muted budget-meta"></div>
+                <div id="budgetSummaryPoints" class="budget-summary-points"></div>
+                <div class="budget-breakdowns">
+                  <div class="panel">
+                    <h4>Per jaar</h4>
+                    <div id="budgetYearTable" class="budget-table"></div>
+                  </div>
+                  <div class="panel">
+                    <h4>Per maand</h4>
+                    <div id="budgetMonthTable" class="budget-table"></div>
+                  </div>
+                </div>
+                <div class="panel">
+                  <h4>Categorie grafiek (inkomsten/uitgaven)</h4>
+                  <div id="budgetCategoryChart" class="budget-chart"></div>
+                  <div id="budgetCategoryDetails" class="budget-category-details"></div>
+                </div>
+              </section>
+            </div>
+          </div>
+        </section>
+
+        <section id="tab-bank-import" class="tab-panel">
+          <div class="panel">
+            <h3>Import CSV</h3>
+            <div class="upload-row upload-row-docs-simple">
+              <div class="dropzone inline-dropzone" id="bankCsvDropzone">Sleep CSV hierheen</div>
+              <input id="bankImportInput" type="file" accept=".csv,text/csv" hidden />
+              <button id="pickBankCsvBtn" class="btn-action" type="button">Bestand kiezen</button>
+            </div>
+          </div>
+          <div class="panel">
+            <h3>Geimporteerde CSV's</h3>
+            <div id="bankImportedCsvList" class="bank-transactions-list"></div>
+          </div>
+        </section>
+
+        <section id="tab-bank-settings" class="tab-panel">
+          <div class="panel">
+            <h3>Settings</h3>
+            <div class="grid admin-form">
+              <div class="form-field" style="grid-column: 1 / -1;">
+                <label for="bankCsvPrompt">LLM prompt voor CSV parsing</label>
+                <textarea id="bankCsvPrompt" rows="5" placeholder="Prompt voor CSV parsing..."></textarea>
+              </div>
+            </div>
+            <h4>Mapping inkomsten / uitgaven</h4>
+            <div class="bank-mapping-create">
+              <input id="newBankMapCategory" type="text" placeholder="Nieuwe categorie" />
+              <select id="newBankMapFlow">
+                <option value="all">Alle</option>
+                <option value="income">Inkomsten</option>
+                <option value="expense">Uitgaven</option>
+              </select>
+              <button id="addBankMapCategoryBtn" class="ghost btn-action" type="button">Categorie toevoegen</button>
+            </div>
+            <div class="bank-mapping-head">
+              <span>Categorie</span>
+              <span>Flow</span>
+              <span>Comma separated waarden</span>
+            </div>
+            <div id="bankCsvMappingRows" class="bank-mapping-rows"></div>
+            <div class="bank-actions-inline bank-import-inline">
+              <button id="saveBankCsvSettingsBtn" class="btn-action" type="button">Opslaan</button>
+            </div>
+          </div>
+        </section>
+
+        <section id="tab-admin-settings" class="tab-panel">
+          <div class="panel"><h3>Settings</h3><p>Voorlopig leeg.</p></div>
+        </section>
+        </main>
+      </div>
+    </div>
+
+    <div id="toastMsg" class="toast hidden"></div>
+    <dialog id="budgetTxModal" class="budget-tx-modal">
+      <form method="dialog" class="budget-tx-modal-inner">
+        <div class="budget-tx-modal-head">
+          <h3>Transactie detail</h3>
+          <button id="budgetTxModalClose" class="ghost btn-action" value="cancel" type="submit">Sluiten</button>
+        </div>
+        <div class="budget-tx-category-row">
+          <label for="budgetTxCategorySelect">Categorie</label>
+          <select id="budgetTxCategorySelect"></select>
+          <button id="budgetTxSaveCategoryBtn" class="btn-action" type="button">Opslaan</button>
+        </div>
+        <div id="budgetTxModalFields" class="budget-tx-fields"></div>
+      </form>
+    </dialog>
+
+    <script src="/app.js?v=20260218i" type="module"></script>
+  </body>
+</html>
