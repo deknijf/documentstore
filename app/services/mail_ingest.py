@@ -32,16 +32,18 @@ def _mailbox_fingerprint(host: str, username: str, folder: str) -> str:
     return hashlib.sha256(base.encode("utf-8")).hexdigest()
 
 
-def _pick_ingest_group(db: Session, configured_group_id: str | None, fallback_user_id: str | None) -> str:
+def _pick_ingest_group(db: Session, tenant_id: str, configured_group_id: str | None, fallback_user_id: str | None) -> str:
     if configured_group_id:
-        grp = db.get(Group, configured_group_id)
+        grp = db.query(Group).filter(Group.id == configured_group_id, Group.tenant_id == tenant_id).first()
         if grp:
             return grp.id
     if fallback_user_id:
-        user = db.get(User, fallback_user_id)
+        user = db.query(User).filter(User.id == fallback_user_id, User.tenant_id == tenant_id).first()
         if user and user.groups:
-            return sorted([g.id for g in user.groups])[0]
-    admins = db.query(Group).filter(Group.name == "Administrators").first()
+            group_ids = sorted([g.id for g in user.groups if str(g.tenant_id or "") == tenant_id])
+            if group_ids:
+                return group_ids[0]
+    admins = db.query(Group).filter(Group.tenant_id == tenant_id, Group.name == "Administrators").first()
     if admins:
         return admins.id
     raise RuntimeError("Geen ingest groep gevonden")
@@ -59,6 +61,7 @@ def ingest_mail_pdfs(
     attachment_types: str = "pdf",
     group_id: str | None = None,
     uploaded_by_user_id: str | None = None,
+    tenant_id: str | None = None,
 ) -> dict:
     host = str(host or "").strip()
     username = str(username or "").strip()
@@ -76,7 +79,7 @@ def ingest_mail_pdfs(
     if not allowed_exts:
         allowed_exts = {"pdf"}
 
-    ingest_group_id = _pick_ingest_group(db, group_id, uploaded_by_user_id)
+    ingest_group_id = _pick_ingest_group(db, tenant_id, group_id, uploaded_by_user_id)
     mailbox_fp = _mailbox_fingerprint(host, username, folder)
 
     client = imaplib.IMAP4_SSL(host, port) if use_ssl else imaplib.IMAP4(host, port)
@@ -121,6 +124,7 @@ def ingest_mail_pdfs(
                 seen = (
                     db.query(MailIngestSeen)
                     .filter(
+                        MailIngestSeen.tenant_id == tenant_id,
                         MailIngestSeen.mailbox_fingerprint == mailbox_fp,
                         MailIngestSeen.message_uid == uid,
                         MailIngestSeen.attachment_name == filename,
@@ -140,6 +144,7 @@ def ingest_mail_pdfs(
                 seen_hash = (
                     db.query(MailIngestSeen)
                     .filter(
+                        MailIngestSeen.tenant_id == tenant_id,
                         MailIngestSeen.mailbox_fingerprint == mailbox_fp,
                         MailIngestSeen.content_sha256 == content_hash,
                     )
@@ -148,6 +153,7 @@ def ingest_mail_pdfs(
                 if seen_hash:
                     db.add(
                         MailIngestSeen(
+                            tenant_id=tenant_id,
                             mailbox_fingerprint=mailbox_fp,
                             message_uid=uid,
                             attachment_name=filename,
@@ -166,6 +172,7 @@ def ingest_mail_pdfs(
 
                 doc = Document(
                     id=document_id,
+                    tenant_id=tenant_id,
                     filename=filename,
                     content_type="application/pdf",
                     file_path=str(file_path),
@@ -181,6 +188,7 @@ def ingest_mail_pdfs(
 
                 db.add(
                     MailIngestSeen(
+                        tenant_id=tenant_id,
                         mailbox_fingerprint=mailbox_fp,
                         message_uid=uid,
                         attachment_name=filename,
@@ -203,3 +211,6 @@ def ingest_mail_pdfs(
         "scanned_messages": scanned_messages,
         "document_ids": document_ids,
     }
+    tenant_id = str(tenant_id or "").strip()
+    if not tenant_id:
+        raise RuntimeError("Tenant is verplicht voor mail ingest")

@@ -4,9 +4,30 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
+    # "development" or "production"
+    environment: str = "development"
+
     app_name: str = "Document Store"
     api_host: str = "0.0.0.0"
     api_port: int = 8000
+    # Public base URL (used for absolute links in emails, etc.)
+    # Example: https://docstore.deknijf.eu
+    public_base_url: str | None = None
+
+    # Security / deployment
+    # Comma-separated list (or empty) of allowed Host headers.
+    # Example: "docstore.deknijf.eu,localhost,127.0.0.1"
+    allowed_hosts: str = ""
+    # Comma-separated list (or empty) of CORS allow origins.
+    # Example: "https://docstore.deknijf.eu"
+    cors_allow_origins: str = ""
+    # When behind a reverse proxy (nginx/traefik/caddy), set true to trust
+    # X-Forwarded-* headers (scheme/host/client ip).
+    trust_proxy_headers: bool = False
+
+    # Session / auth
+    # Default 30 days.
+    session_ttl_days: int = 30
 
     data_dir: str = "data"
     uploads_dir: str = "data/uploads"
@@ -56,6 +77,11 @@ class Settings(BaseSettings):
     mail_ingest_frequency_minutes: int = 0
     mail_ingest_group_id: str | None = None
     mail_ingest_attachment_types: str = "pdf"
+    smtp_server: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    smtp_sender_email: str | None = None
     integration_master_key: str = "change-this-in-production"
     admin_default_password: str = "admin"
 

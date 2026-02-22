@@ -1,0 +1,20 @@
+[Unit]
+Description=Docstore (Docker Compose)
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/home/admin/docstore
+ExecStartPre=/usr/bin/docker compose -f /home/admin/docstore/docker-compose.yml pull
+ExecStart=/usr/bin/docker compose -f /home/admin/docstore/docker-compose.yml up -d
+ExecStop=/usr/bin/docker compose -f /home/admin/docstore/docker-compose.yml down
+TimeoutStartSec=0
+User=admin
+Group=admin
+
+[Install]
+WantedBy=multi-user.target
+

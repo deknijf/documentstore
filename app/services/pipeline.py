@@ -102,7 +102,7 @@ def process_document(db: Session, document_id: str, ocr_provider_name: str | Non
     db.commit()
 
     try:
-        runtime = get_runtime_settings(db)
+        runtime = get_runtime_settings(db, tenant_id=doc.tenant_id)
         ocr_provider = _get_ocr_provider(ocr_provider_name or "", runtime)
         thumbnail_service = ThumbnailService()
 
@@ -122,7 +122,7 @@ def process_document(db: Session, document_id: str, ocr_provider_name: str | Non
             or (ai_provider in {"google", "gemini"} and bool(runtime.get("google_api_key")))
         )
         if ai_enabled:
-            categories = db.query(CategoryCatalog).all()
+            categories = db.query(CategoryCatalog).filter(CategoryCatalog.tenant_id == doc.tenant_id).all()
             for c in categories:
                 fields: list[str] = []
                 parse_config: list[dict] = []
@@ -245,6 +245,7 @@ def process_document(db: Session, document_id: str, ocr_provider_name: str | Non
         if doc.category:
             cat = (
                 db.query(CategoryCatalog)
+                .filter(CategoryCatalog.tenant_id == doc.tenant_id)
                 .filter(func.lower(CategoryCatalog.name) == doc.category.lower())
                 .first()
             )

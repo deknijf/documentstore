@@ -1,5 +1,6 @@
 import json
 import re
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -30,7 +31,14 @@ def _provider_model(runtime: dict[str, Any]) -> tuple[str, str]:
     return "openrouter", str(runtime.get("openrouter_model") or "openai/gpt-4o-mini")
 
 
-def _call_llm(runtime: dict[str, Any], prompt: str) -> dict[str, Any]:
+def _call_llm(runtime: dict[str, Any], prompt: str, *, max_retries: int = 3) -> dict[str, Any]:
+    def _should_retry_status(code: int) -> bool:
+        return code in {408, 409, 429} or code >= 500
+
+    def _retry_delay(attempt: int) -> float:
+        # 0.8s, 1.6s, 3.2s ...
+        return min(6.0, 0.8 * (2 ** max(0, attempt - 1)))
+
     provider, model = _provider_model(runtime)
     if provider == "openai":
         api_key = runtime.get("openai_api_key")
@@ -44,18 +52,29 @@ def _call_llm(runtime: dict[str, Any], prompt: str) -> dict[str, Any]:
             ],
             "temperature": 0.1,
         }
-        response = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-            timeout=120,
-        )
-        response.raise_for_status()
-        content = response.json()["choices"][0]["message"]["content"]
-        return _extract_json(content)
+        last_error: Exception | None = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = requests.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                    timeout=120,
+                )
+                if _should_retry_status(response.status_code):
+                    raise RuntimeError(f"OpenAI tijdelijk onbeschikbaar ({response.status_code})")
+                response.raise_for_status()
+                content = response.json()["choices"][0]["message"]["content"]
+                return _extract_json(content)
+            except Exception as ex:
+                last_error = ex
+                if attempt >= max_retries:
+                    break
+                time.sleep(_retry_delay(attempt))
+        raise RuntimeError(f"OpenAI request mislukt na retries: {last_error}")
 
     if provider == "google":
         api_key = runtime.get("google_api_key")
@@ -65,22 +84,33 @@ def _call_llm(runtime: dict[str, Any], prompt: str) -> dict[str, Any]:
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"temperature": 0.1},
         }
-        response = requests.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-            params={"key": api_key},
-            headers={"Content-Type": "application/json"},
-            json=payload,
-            timeout=120,
-        )
-        response.raise_for_status()
-        data = response.json()
-        content = (
-            data.get("candidates", [{}])[0]
-            .get("content", {})
-            .get("parts", [{}])[0]
-            .get("text", "")
-        )
-        return _extract_json(content)
+        last_error: Exception | None = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = requests.post(
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                    params={"key": api_key},
+                    headers={"Content-Type": "application/json"},
+                    json=payload,
+                    timeout=120,
+                )
+                if _should_retry_status(response.status_code):
+                    raise RuntimeError(f"Google tijdelijk onbeschikbaar ({response.status_code})")
+                response.raise_for_status()
+                data = response.json()
+                content = (
+                    data.get("candidates", [{}])[0]
+                    .get("content", {})
+                    .get("parts", [{}])[0]
+                    .get("text", "")
+                )
+                return _extract_json(content)
+            except Exception as ex:
+                last_error = ex
+                if attempt >= max_retries:
+                    break
+                time.sleep(_retry_delay(attempt))
+        raise RuntimeError(f"Google request mislukt na retries: {last_error}")
 
     api_key = runtime.get("openrouter_api_key")
     if not api_key:
@@ -93,18 +123,29 @@ def _call_llm(runtime: dict[str, Any], prompt: str) -> dict[str, Any]:
         ],
         "temperature": 0.1,
     }
-    response = requests.post(
-        "https://openrouter.ai/api/v1/chat/completions",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        json=payload,
-        timeout=120,
-    )
-    response.raise_for_status()
-    content = response.json()["choices"][0]["message"]["content"]
-    return _extract_json(content)
+    last_error: Exception | None = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=120,
+            )
+            if _should_retry_status(response.status_code):
+                raise RuntimeError(f"OpenRouter tijdelijk onbeschikbaar ({response.status_code})")
+            response.raise_for_status()
+            content = response.json()["choices"][0]["message"]["content"]
+            return _extract_json(content)
+        except Exception as ex:
+            last_error = ex
+            if attempt >= max_retries:
+                break
+            time.sleep(_retry_delay(attempt))
+    raise RuntimeError(f"OpenRouter request mislukt na retries: {last_error}")
 
 
 def analyze_budget_transactions_with_llm(
@@ -211,12 +252,16 @@ Geef ENKEL geldige JSON terug met exact dit schema:
     if progress_callback:
         progress_callback(0, total)
     chunk_size = 80
+    failed_chunks = 0
     for i in range(0, len(compact_transactions), chunk_size):
         chunk = compact_transactions[i : i + chunk_size]
-        data = _call_llm(runtime, _build_chunk_prompt(chunk))
-        chunk_categories = data.get("transaction_categories") if isinstance(data, dict) else []
-        if isinstance(chunk_categories, list):
-            categories_all.extend(chunk_categories)
+        try:
+            data = _call_llm(runtime, _build_chunk_prompt(chunk))
+            chunk_categories = data.get("transaction_categories") if isinstance(data, dict) else []
+            if isinstance(chunk_categories, list):
+                categories_all.extend(chunk_categories)
+        except Exception:
+            failed_chunks += 1
         if progress_callback:
             progress_callback(min(i + len(chunk), total), total)
 
@@ -245,8 +290,20 @@ Geef ENKEL geldige JSON terug met exact dit schema:
         {"category": cat, "income": vals["income"], "expense": vals["expense"]}
         for cat, vals in per_category.items()
     ]
-    summary_data = _call_llm(runtime, _build_summary_prompt(summary_input[:120])) if summary_input else {}
-    summary_points = summary_data.get("summary_points") if isinstance(summary_data, dict) else []
+    summary_points: list[str] = []
+    if summary_input:
+        try:
+            summary_data = _call_llm(runtime, _build_summary_prompt(summary_input[:120]))
+            parsed_points = summary_data.get("summary_points") if isinstance(summary_data, dict) else []
+            if isinstance(parsed_points, list):
+                summary_points = [str(p) for p in parsed_points if str(p).strip()]
+        except Exception as ex:
+            summary_points = [f"Samenvatting via LLM tijdelijk niet beschikbaar: {str(ex)}"]
+    if failed_chunks:
+        summary_points.insert(
+            0,
+            f"LLM chunk fallback actief: {failed_chunks} chunk(s) tijdelijk mislukt; categorieën aangevuld via fallbackregels.",
+        )
     return {
         "summary_points": summary_points if isinstance(summary_points, list) else [],
         "transaction_categories": categories_all,

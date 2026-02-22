@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/styles.css?v=20260218f" />
+    <link rel="stylesheet" href="/styles.css?v=20260219k" />
   </head>
   <body>
     <svg
@@ -29,12 +29,62 @@
       <div class="login-card">
         <div class="login-logo-wrap">
           <img src="/docstore_logo2.png" alt="Docstore logo" class="login-logo" />
-          <h1>Document Store</h1>
+          <h1>docstore</h1>
         </div>
-        <p>Login om je documentomgeving te openen.</p>
-        <input id="emailInput" type="text" placeholder="Email/login" value="admin" />
-        <input id="passwordInput" type="password" placeholder="Wachtwoord" value="admin" />
-        <button id="loginBtn">Inloggen</button>
+        <div id="authToggle" class="auth-toggle">
+          <button id="authModeLoginBtn" type="button" class="auth-toggle-btn active">Login</button>
+          <button id="authModeSignupBtn" type="button" class="auth-toggle-btn">Signup</button>
+        </div>
+
+        <form id="loginForm" class="auth-form">
+          <label for="emailInput">Email/login</label>
+          <input id="emailInput" type="text" placeholder="Email/login" value="admin" />
+          <label for="passwordInput">Password</label>
+          <input id="passwordInput" type="password" placeholder="Password" value="admin" />
+          <button id="forgotPasswordLink" type="button" class="auth-link-btn">Forgot password?</button>
+          <button id="loginBtn" type="submit">Login</button>
+          <p class="auth-footnote">
+            Not a member?
+            <button id="switchToSignupLink" type="button" class="auth-inline-link">Signup now</button>
+          </p>
+        </form>
+
+        <form id="signupForm" class="auth-form hidden">
+          <label for="signupNameInput">Naam</label>
+          <input id="signupNameInput" type="text" placeholder="Naam" />
+          <label for="signupEmailInput">Email address</label>
+          <input id="signupEmailInput" type="email" placeholder="john.doe@example.com" />
+          <label for="signupPasswordInput">Password</label>
+          <input id="signupPasswordInput" type="password" placeholder="Min 8 characters" />
+          <label for="signupPasswordConfirmInput">Confirm password</label>
+          <input id="signupPasswordConfirmInput" type="password" placeholder="Confirm password" />
+          <button id="signupBtn" type="submit">Signup</button>
+          <p class="auth-footnote">
+            Already a member?
+            <button id="switchToLoginLink" type="button" class="auth-inline-link">Login now</button>
+          </p>
+        </form>
+        <form id="forgotForm" class="auth-form hidden">
+          <label for="forgotEmailInput">Email</label>
+          <input id="forgotEmailInput" type="email" placeholder="Email address" />
+          <button id="forgotSubmitBtn" type="submit">Reset password</button>
+          <p class="auth-footnote">
+            <button id="switchFromForgotToLoginLink" type="button" class="auth-inline-link">Back to login</button>
+          </p>
+        </form>
+
+        <form id="resetPasswordForm" class="auth-form hidden">
+          <label for="resetEmailInput">Email</label>
+          <input id="resetEmailInput" type="email" placeholder="Email address" />
+          <label for="resetPasswordInput">Password</label>
+          <input id="resetPasswordInput" type="password" placeholder="Min 8 characters" />
+          <label for="resetConfirmPasswordInput">Confirm password</label>
+          <input id="resetConfirmPasswordInput" type="password" placeholder="Confirm password" />
+          <button id="resetPasswordBtn" type="submit">Set password</button>
+          <p class="auth-footnote">
+            <button id="switchFromResetToLoginLink" type="button" class="auth-inline-link">Back to login</button>
+          </p>
+        </form>
         <p class="hint">Default admin: <code>admin / admin</code></p>
       </div>
     </div>
@@ -57,6 +107,10 @@
             />
             <div id="searchSuggest" class="search-suggest hidden"></div>
           </div>
+          <div id="tenantSwitchWrap" class="mast-tenant-wrap hidden">
+            <select id="tenantSwitchSelect" class="mast-tenant-select"></select>
+            <div id="tenantFixedBadge" class="mast-tenant-fixed hidden"></div>
+          </div>
           <div id="userInfo" class="mast-user" role="button" tabindex="0"></div>
         </div>
       </header>
@@ -68,6 +122,7 @@
           </div>
           <nav class="menu">
             <button class="menu-item active" data-tab="dashboard"><span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5V21a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1V10.5Z"/></svg></span><span class="menu-label">Dashboard</span></button>
+            <button class="menu-item" data-tab="views"><span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6Zm3 2h10v2H7V8Zm0 4h10v2H7v-2Zm0 4h6v2H7v-2Z"/></svg></span><span class="menu-label">Views</span></button>
             <button class="menu-item" data-tab="documents"><span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 2h8l5 5v13a2 2 0 0 1-2 2H7a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3Zm8 1.5V8h4.5"/></svg></span><span class="menu-label">Documenten</span></button>
             <button class="menu-item" data-tab="labels"><span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 12 9-9h7l2 2v7l-9 9-9-9Zm12-5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"/></svg></span><span class="menu-label">Labels</span></button>
             <button class="menu-item" data-tab="senders"><span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18v14H3V5Zm3 2 6 5 6-5H6Zm13 10V8l-7 5.8L5 8v9h14Z"/></svg></span><span class="menu-label">Afzenders</span></button>
@@ -85,7 +140,8 @@
               <button class="menu-item" data-tab="admin-users"><span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5Zm0 2c-5 0-9 2.2-9 5v2h18v-2c0-2.8-4-5-9-5Z"/></svg></span><span class="menu-label">Gebruikers</span></button>
               <button class="menu-item" data-tab="admin-groups"><span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 11a3 3 0 1 0-3-3 3 3 0 0 0 3 3Zm10 0a3 3 0 1 0-3-3 3 3 0 0 0 3 3ZM7 13c-3.3 0-6 1.6-6 3.5V20h9v-3.5C10 14.6 9 13.6 7 13Zm10 0c-2 0-3 .6-3 3.5V20h9v-3.5c0-1.9-2.7-3.5-6-3.5ZM12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Zm0 2c-2.7 0-5 1.2-5 2.8V20h10v-3.2c0-1.6-2.3-2.8-5-2.8Z"/></svg></span><span class="menu-label">Groepen</span></button>
               <button class="menu-item" data-tab="admin-integrations"><span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 2 .7 2.1a8 8 0 0 1 1.8.8l2-1 1.5 2.6-1.8 1.3a8 8 0 0 1 0 2l1.8 1.3-1.5 2.6-2-1a8 8 0 0 1-1.8.8L14.5 22h-3l-.7-2.1a8 8 0 0 1-1.8-.8l-2 1-1.5-2.6 1.8-1.3a8 8 0 0 1 0-2L5.5 9l1.5-2.6 2 1a8 8 0 0 1 1.8-.8L11.5 2h3ZM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"/></svg></span><span class="menu-label">Integraties</span></button>
-              <button class="menu-item" data-tab="admin-settings"><span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a2 2 0 0 1 2 2v1.1a7.5 7.5 0 0 1 1.5.6l.8-.8a2 2 0 1 1 2.8 2.8l-.8.8c.2.5.4 1 .6 1.5H20a2 2 0 1 1 0 4h-1.1a7.5 7.5 0 0 1-.6 1.5l.8.8a2 2 0 1 1-2.8 2.8l-.8-.8a7.5 7.5 0 0 1-1.5.6V20a2 2 0 1 1-4 0v-1.1a7.5 7.5 0 0 1-1.5-.6l-.8.8a2 2 0 1 1-2.8-2.8l.8-.8a7.5 7.5 0 0 1-.6-1.5H4a2 2 0 1 1 0-4h1.1a7.5 7.5 0 0 1 .6-1.5l-.8-.8a2 2 0 1 1 2.8-2.8l.8.8a7.5 7.5 0 0 1 1.5-.6V4a2 2 0 0 1 2-2Zm0 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"/></svg></span><span class="menu-label">Settings</span></button>
+              <button class="menu-item" data-tab="admin-tenants"><span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a2 2 0 0 1 2 2v1.1a7.5 7.5 0 0 1 1.5.6l.8-.8a2 2 0 1 1 2.8 2.8l-.8.8c.2.5.4 1 .6 1.5H20a2 2 0 1 1 0 4h-1.1a7.5 7.5 0 0 1-.6 1.5l.8.8a2 2 0 1 1-2.8 2.8l-.8-.8a7.5 7.5 0 0 1-1.5.6V20a2 2 0 1 1-4 0v-1.1a7.5 7.5 0 0 1-1.5-.6l-.8.8a2 2 0 1 1-2.8-2.8l.8-.8a7.5 7.5 0 0 1-.6-1.5H4a2 2 0 1 1 0-4h1.1a7.5 7.5 0 0 1 .6-1.5l-.8-.8a2 2 0 1 1 2.8-2.8l.8.8a7.5 7.5 0 0 1 1.5-.6V4a2 2 0 0 1 2-2Zm0 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"/></svg></span><span class="menu-label">Tenants</span></button>
+              <button class="menu-item" data-tab="admin-audit"><span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h11l3 3v15a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm10 1.5V7h2.5L15 4.5ZM7 10h10v2H7v-2Zm0 4h10v2H7v-2Zm0 4h6v2H7v-2Z"/></svg></span><span class="menu-label">Audit</span></button>
             </div>
           </nav>
           <button id="logoutBtn" class="logout">Logout</button>
@@ -181,10 +237,27 @@
                   <label><input type="radio" name="fPaidRadio" value="unpaid" /> Onbetaald</label>
                 </div>
               </section>
+
+              <section class="facet-section facet-full">
+                <h4>Saved view</h4>
+                <div class="saved-view-row">
+                  <input id="savedViewName" class="input" type="text" placeholder="Naam (bv. Openstaande facturen)" />
+                  <button id="saveViewBtn" class="btn-action" type="button">Opslaan</button>
+                </div>
+                <small class="muted">Sla de huidige filters op als een view.</small>
+              </section>
             </div>
           </div>
           <div id="dashboardCards" class="cards"></div>
           <div id="dashboardPager" class="pager"></div>
+        </section>
+
+        <section id="tab-views" class="tab-panel">
+          <div class="panel">
+            <h2>Views</h2>
+            <p class="muted">Klik op een view om de filters toe te passen.</p>
+            <div id="viewsList" class="views-list"></div>
+          </div>
         </section>
 
         <section id="tab-profile" class="tab-panel">
@@ -403,8 +476,8 @@
                 <input id="newUserPassword" type="password" placeholder="Wachtwoord" />
               </div>
               <div class="form-field">
-                <label for="newUserGroups">Groep</label>
-                <select id="newUserGroups"></select>
+                <label for="newUserRole">Permissies</label>
+                <select id="newUserRole"></select>
               </div>
               <button id="createUserBtn" class="btn-action">Gebruiker aanmaken</button>
             </div>
@@ -429,8 +502,8 @@
                     <input id="editUserPassword" type="password" placeholder="Nieuw wachtwoord" />
                   </div>
                   <div class="form-field">
-                    <label for="editUserGroup">Groep</label>
-                    <select id="editUserGroup"></select>
+                    <label for="editUserRole">Permissies</label>
+                    <select id="editUserRole"></select>
                   </div>
                 </div>
                 <div class="user-detail-actions">
@@ -658,6 +731,32 @@
                 </div>
               </div>
             </div>
+            <div class="integration-block">
+              <h4>Mail uitsturen - SMTP</h4>
+              <div class="grid admin-form">
+                <div class="form-field">
+                  <label for="iSmtpServer">SMTP server</label>
+                  <input id="iSmtpServer" type="text" placeholder="smtp.provider.tld" />
+                </div>
+                <div class="form-field">
+                  <label for="iSmtpPort">SMTP poort</label>
+                  <input id="iSmtpPort" type="number" min="1" step="1" placeholder="587" />
+                </div>
+                <div class="form-field">
+                  <label for="iSmtpUsername">Gebruikersnaam</label>
+                  <input id="iSmtpUsername" type="text" placeholder="SMTP login" />
+                </div>
+                <div class="form-field">
+                  <label for="iSmtpSenderEmail">Sender adres</label>
+                  <input id="iSmtpSenderEmail" type="email" placeholder="docstore@deknijf.eu" />
+                </div>
+                <div class="form-field">
+                  <label for="iSmtpPassword">Wachtwoord (write-only)</label>
+                  <input id="iSmtpPassword" type="password" placeholder="nieuw invullen om te wijzigen" />
+                </div>
+                <div id="iSmtpPasswordStatus" class="secret-status"></div>
+              </div>
+            </div>
             <button id="saveIntegrationsBtn" class="btn-action">Opslaan</button>
           </div>
         </section>
@@ -712,7 +811,6 @@
             <div class="budget-head">
               <h3>Budget analyse</h3>
               <div class="bank-actions-inline">
-                <button id="budgetRefreshBtn" class="ghost btn-action" type="button">Refresh</button>
                 <button id="budgetAnalyzeBtn" class="btn-action" type="button">Analyze</button>
               </div>
             </div>
@@ -802,8 +900,53 @@
           </div>
         </section>
 
-        <section id="tab-admin-settings" class="tab-panel">
-          <div class="panel"><h3>Settings</h3><p>Voorlopig leeg.</p></div>
+        <section id="tab-admin-tenants" class="tab-panel">
+          <div class="panel">
+            <h3>Tenant onboarding</h3>
+            <div class="grid admin-form">
+              <div class="form-field">
+                <label for="tenantNameInput">Tenant naam</label>
+                <input id="tenantNameInput" type="text" placeholder="Acme BV" />
+              </div>
+              <div class="form-field">
+                <label for="tenantSlugInput">Tenant slug (optioneel)</label>
+                <input id="tenantSlugInput" type="text" placeholder="acme-bv" />
+              </div>
+              <button id="createTenantBtn" class="btn-action" type="button">Tenant aanmaken</button>
+            </div>
+          </div>
+          <div class="panel">
+            <h3>Bestaande tenants</h3>
+            <div id="tenantsList" class="tenants-list"></div>
+            <h4>Users per tenant</h4>
+            <div class="grid admin-form">
+              <div class="form-field">
+                <label for="tenantUserTenantSelect">Tenant</label>
+                <select id="tenantUserTenantSelect"></select>
+              </div>
+              <div class="form-field">
+                <label for="tenantUserSelect">Bestaande users</label>
+                <div class="tenant-user-add-row">
+                  <select id="tenantUserSelect"></select>
+                  <button id="tenantAddUserBtn" class="ghost btn-action" type="button">Toevoegen</button>
+                </div>
+              </div>
+              <div class="form-field profile-span-all">
+                <label>Users in tenant</label>
+                <div id="tenantUserBadges" class="tenant-user-badges"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="tab-admin-audit" class="tab-panel">
+          <div class="panel">
+            <div class="panel-head">
+              <h2>Audit logs</h2>
+              <button id="auditRefreshBtn" class="icon-refresh" aria-label="Vernieuwen" title="Vernieuwen">↻</button>
+            </div>
+            <div id="auditList" class="audit-list"></div>
+          </div>
         </section>
         </main>
       </div>
@@ -825,6 +968,6 @@
       </form>
     </dialog>
 
-    <script src="/app.js?v=20260218i" type="module"></script>
+    <script src="/app.js?v=20260221v2" type="module"></script>
   </body>
 </html>

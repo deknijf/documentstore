@@ -3,6 +3,28 @@ const appView = document.getElementById("appView");
 const emailInput = document.getElementById("emailInput");
 const passwordInput = document.getElementById("passwordInput");
 const loginBtn = document.getElementById("loginBtn");
+const loginForm = document.getElementById("loginForm");
+const signupForm = document.getElementById("signupForm");
+const authModeLoginBtn = document.getElementById("authModeLoginBtn");
+const authModeSignupBtn = document.getElementById("authModeSignupBtn");
+const switchToSignupLink = document.getElementById("switchToSignupLink");
+const switchToLoginLink = document.getElementById("switchToLoginLink");
+const forgotPasswordLink = document.getElementById("forgotPasswordLink");
+const forgotForm = document.getElementById("forgotForm");
+const forgotEmailInput = document.getElementById("forgotEmailInput");
+const forgotSubmitBtn = document.getElementById("forgotSubmitBtn");
+const switchFromForgotToLoginLink = document.getElementById("switchFromForgotToLoginLink");
+const resetPasswordForm = document.getElementById("resetPasswordForm");
+const resetEmailInput = document.getElementById("resetEmailInput");
+const resetPasswordInput = document.getElementById("resetPasswordInput");
+const resetConfirmPasswordInput = document.getElementById("resetConfirmPasswordInput");
+const resetPasswordBtn = document.getElementById("resetPasswordBtn");
+const switchFromResetToLoginLink = document.getElementById("switchFromResetToLoginLink");
+const signupNameInput = document.getElementById("signupNameInput");
+const signupEmailInput = document.getElementById("signupEmailInput");
+const signupPasswordInput = document.getElementById("signupPasswordInput");
+const signupPasswordConfirmInput = document.getElementById("signupPasswordConfirmInput");
+const signupBtn = document.getElementById("signupBtn");
 const logoutBtn = document.getElementById("logoutBtn");
 const mastHomeLink = document.getElementById("mastHomeLink");
 const userInfo = document.getElementById("userInfo");
@@ -14,9 +36,14 @@ const checkBankBtn = document.getElementById("checkBankBtn");
 const adminMenuWrap = document.getElementById("adminMenuWrap");
 const bankMenuWrap = document.getElementById("bankMenuWrap");
 const menuBankApi = document.getElementById("menuBankApi");
+const auditRefreshBtn = document.getElementById("auditRefreshBtn");
+const auditList = document.getElementById("auditList");
 const clearFacetsBtn = document.getElementById("clearFacetsBtn");
 const facetToggleBtn = document.getElementById("facetToggleBtn");
 const facetLayout = document.getElementById("facetLayout");
+const savedViewName = document.getElementById("savedViewName");
+const saveViewBtn = document.getElementById("saveViewBtn");
+const viewsList = document.getElementById("viewsList");
 const sidebar = document.getElementById("sidebar");
 const mobileMenuBtn = document.getElementById("mobileMenuBtn");
 const mobileNavBackdrop = document.getElementById("mobileNavBackdrop");
@@ -26,6 +53,9 @@ const tabPanels = Array.from(document.querySelectorAll(".tab-panel"));
 
 const searchInput = document.getElementById("searchInput");
 const searchSuggest = document.getElementById("searchSuggest");
+const tenantSwitchWrap = document.getElementById("tenantSwitchWrap");
+const tenantSwitchSelect = document.getElementById("tenantSwitchSelect");
+const tenantFixedBadge = document.getElementById("tenantFixedBadge");
 const facetStatus = document.getElementById("facetStatus");
 const facetPaid = document.getElementById("facetPaid");
 const facetCategories = document.getElementById("facetCategories");
@@ -107,13 +137,13 @@ const userDetailTitle = document.getElementById("userDetailTitle");
 const editUserName = document.getElementById("editUserName");
 const editUserEmail = document.getElementById("editUserEmail");
 const editUserPassword = document.getElementById("editUserPassword");
-const editUserGroup = document.getElementById("editUserGroup");
+const editUserRole = document.getElementById("editUserRole");
 const saveUserDetailBtn = document.getElementById("saveUserDetailBtn");
 const deleteUserDetailBtn = document.getElementById("deleteUserDetailBtn");
 const newUserEmail = document.getElementById("newUserEmail");
 const newUserName = document.getElementById("newUserName");
 const newUserPassword = document.getElementById("newUserPassword");
-const newUserGroups = document.getElementById("newUserGroups");
+const newUserRole = document.getElementById("newUserRole");
 const createUserBtn = document.getElementById("createUserBtn");
 const selfName = document.getElementById("selfName");
 const selfEmail = document.getElementById("selfEmail");
@@ -146,7 +176,6 @@ const budgetYearFacet = document.getElementById("budgetYearFacet");
 const budgetMonthFacet = document.getElementById("budgetMonthFacet");
 const budgetClearFiltersBtn = document.getElementById("budgetClearFiltersBtn");
 const budgetAnalyzeBtn = document.getElementById("budgetAnalyzeBtn");
-const budgetRefreshBtn = document.getElementById("budgetRefreshBtn");
 const budgetAnalyzeProgress = document.getElementById("budgetAnalyzeProgress");
 const budgetSummaryCards = document.getElementById("budgetSummaryCards");
 const budgetCategoryChart = document.getElementById("budgetCategoryChart");
@@ -213,10 +242,29 @@ const iMailGroup = document.getElementById("iMailGroup");
 const iMailAttachmentTypes = document.getElementById("iMailAttachmentTypes");
 const mailAttachmentTypeEditor = document.getElementById("mailAttachmentTypeEditor");
 const iMailPasswordStatus = document.getElementById("iMailPasswordStatus");
+const iSmtpServer = document.getElementById("iSmtpServer");
+const iSmtpPort = document.getElementById("iSmtpPort");
+const iSmtpUsername = document.getElementById("iSmtpUsername");
+const iSmtpSenderEmail = document.getElementById("iSmtpSenderEmail");
+const iSmtpPassword = document.getElementById("iSmtpPassword");
+const iSmtpPasswordStatus = document.getElementById("iSmtpPasswordStatus");
 const runMailIngestBtn = document.getElementById("runMailIngestBtn");
+const tenantNameInput = document.getElementById("tenantNameInput");
+const tenantSlugInput = document.getElementById("tenantSlugInput");
+const createTenantBtn = document.getElementById("createTenantBtn");
+const tenantsList = document.getElementById("tenantsList");
+const tenantUserTenantSelect = document.getElementById("tenantUserTenantSelect");
+const tenantUserSelect = document.getElementById("tenantUserSelect");
+const tenantAddUserBtn = document.getElementById("tenantAddUserBtn");
+const tenantUserBadges = document.getElementById("tenantUserBadges");
 
 let token = localStorage.getItem("token") || "";
 let currentUser = null;
+let tenants = [];
+let tenantAllUsers = [];
+let tenantSelectedUsers = [];
+let editingTenantId = "";
+let editingTenantName = "";
 let groups = [];
 let allDocs = [];
 let docs = [];
@@ -266,6 +314,11 @@ let bankCsvMappingGroups = [];
 let budgetAnalyzedTransactions = [];
 let budgetAnalysisMeta = null;
 let budgetAnalyzeProgressTimer = null;
+let analyzeJobPollTimer = null;
+let checkBankJobPollTimer = null;
+let savedViews = [];
+let auditLogs = [];
+const GROUPS_ENABLED = false;
 let selectedBudgetCategory = "";
 let selectedBudgetCategoryLabel = "";
 let budgetDetailSortColumn = "date";
@@ -275,6 +328,7 @@ const selectedBudgetYears = new Set();
 const selectedBudgetMonths = new Set();
 const TAB_TO_ROUTE = {
   dashboard: "/dashboard",
+  views: "/views",
   profile: "/profiel",
   documents: "/documenten",
   labels: "/labels",
@@ -288,7 +342,8 @@ const TAB_TO_ROUTE = {
   "admin-users": "/admin/gebruikers",
   "admin-groups": "/admin/groepen",
   "admin-integrations": "/admin/integraties",
-  "admin-settings": "/admin/settings",
+  "admin-tenants": "/admin/tenants",
+  "admin-audit": "/admin/audit",
 };
 const ROUTE_TO_TAB = Object.fromEntries(
   Object.entries(TAB_TO_ROUTE).map(([tab, route]) => [route, tab]),
@@ -705,6 +760,14 @@ function formatDisplayDate(value) {
   return raw;
 }
 
+function formatDisplayDateTime(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})/);
+  if (m) return `${m[3]}/${m[2]}/${m[1]} ${m[4]}:${m[5]}`;
+  return formatDisplayDate(raw);
+}
+
 function parseDateAsUtc(value) {
   const raw = String(value || "").trim();
   if (!raw) return null;
@@ -816,8 +879,13 @@ async function applyRouteFromHash() {
   const isAdminTab = nextTab.startsWith("admin-");
   const isAdminUser = !!(currentUser?.is_admin ?? currentUser?.is_bootstrap_admin);
   const isBankTab = nextTab.startsWith("bank-");
-  if ((isAdminTab || isBankTab) && !isAdminUser) {
+  const bankRestricted = new Set(["bank-import", "bank-settings", "bank-api"]);
+  if (isAdminTab && !isAdminUser) {
     setTab("dashboard", { syncRoute: true, replaceRoute: true });
+    return;
+  }
+  if (isBankTab && bankRestricted.has(nextTab) && !isAdminUser) {
+    setTab("bank-budget", { syncRoute: true, replaceRoute: true });
     return;
   }
   if (nextTab === "bank-api" && !anyXs2aEnabled()) {
@@ -831,12 +899,16 @@ function setTab(tabId, { syncRoute = true, replaceRoute = false } = {}) {
   const isAdminTab = String(tabId || "").startsWith("admin-");
   const isBankTab = String(tabId || "").startsWith("bank-");
   const isAdminUser = !!(currentUser?.is_admin ?? currentUser?.is_bootstrap_admin);
-  if ((isAdminTab || isBankTab) && !isAdminUser) tabId = "dashboard";
+  const bankRestricted = new Set(["bank-import", "bank-settings", "bank-api"]);
+  if (isAdminTab && !isAdminUser) tabId = "dashboard";
+  if (isBankTab && bankRestricted.has(String(tabId || "")) && !isAdminUser) tabId = "bank-budget";
   menuItems.forEach((item) => item.classList.toggle("active", item.dataset.tab === tabId));
   tabPanels.forEach((p) => p.classList.toggle("active", p.id === `tab-${tabId}`));
   pageTitle.textContent =
     tabId === "dashboard"
       ? "Dashboard"
+      : tabId === "views"
+      ? "Views"
       : tabId === "profile"
       ? "Mijn profiel"
       : tabId === "documents"
@@ -863,11 +935,15 @@ function setTab(tabId, { syncRoute = true, replaceRoute = false } = {}) {
       ? "Admin · Groepen"
       : tabId === "admin-integrations"
       ? "Admin · Integraties"
+      : tabId === "admin-tenants"
+      ? "Admin · Tenants"
+      : tabId === "admin-audit"
+      ? "Admin · Audit"
       : tabId === "document-detail"
       ? isMobileLayout()
         ? "Document"
         : "Document detail"
-      : "Admin · Settings";
+      : "Admin · Tenants";
   if (topbarEl) {
     topbarEl.classList.toggle("detail-mobile-layout", tabId === "document-detail");
     topbarEl.classList.toggle("dashboard-mobile-layout", tabId === "dashboard");
@@ -875,10 +951,203 @@ function setTab(tabId, { syncRoute = true, replaceRoute = false } = {}) {
   renderDetailOverdueAlert();
   updateBulkButtons();
   if (tabId === "profile") populateSelfProfile();
+  if (tabId === "views") void loadViews();
   if (tabId === "bank-api") void loadBankAccounts();
   if (tabId === "bank-budget") void loadBudgetAnalysis();
   if (tabId === "bank-import") void loadBankImportedCsvFiles();
+  if (tabId === "admin-tenants") void loadTenants();
+  if (tabId === "admin-audit") void loadAudit();
   if (syncRoute) updateHashRoute(routeForTab(tabId), { replace: replaceRoute });
+}
+
+async function loadAudit() {
+  if (!auditList) return;
+  try {
+    const r = await authFetch("/api/admin/audit?limit=500&offset=0");
+    if (!r.ok) throw new Error("audit load failed");
+    auditLogs = await r.json();
+  } catch {
+    auditLogs = [];
+  }
+  renderAudit();
+}
+
+function renderAudit() {
+  if (!auditList) return;
+  if (!auditLogs.length) {
+    auditList.innerHTML = "<div class='panel'>Nog geen audit logs.</div>";
+    return;
+  }
+  auditList.innerHTML = auditLogs
+    .map((row) => {
+      const who = [row.user_name || "", row.user_email && row.user_email !== row.user_name ? `(${row.user_email})` : ""]
+        .filter(Boolean)
+        .join(" ");
+      const target = [row.entity_type || "", row.entity_id ? `#${row.entity_id}` : ""].filter(Boolean).join(" ");
+      const meta = [
+        who ? `door ${escapeHtml(who)}` : "door (onbekend)",
+        target ? `op ${escapeHtml(target)}` : "",
+        row.ip ? `ip ${escapeHtml(row.ip)}` : "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      const details = row.details && Object.keys(row.details).length ? `<pre class="audit-details">${escapeHtml(JSON.stringify(row.details, null, 2))}</pre>` : "";
+      return `
+        <div class="audit-item">
+          <div class="audit-top">
+            <div class="audit-action">${escapeHtml(String(row.action || ""))}</div>
+            <div class="audit-time">${escapeHtml(formatDisplayDateTime(row.created_at))}</div>
+          </div>
+          <div class="audit-meta">${meta}</div>
+          ${details}
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function currentFacetFilters() {
+  const status = currentStatusFilter();
+  const paid = currentPaidFilter();
+  const categories = Array.from(facetSelections.categories || []);
+  const issuers = Array.from(facetSelections.issuers || []);
+  const label_ids = Array.from(facetSelections.labels || []);
+  const filters = {};
+  if (status) filters.status = status;
+  if (paid) filters.paid = paid;
+  if (categories.length) filters.categories = categories;
+  if (issuers.length) filters.issuers = issuers;
+  if (label_ids.length) filters.label_ids = label_ids;
+  if (fDocDateFrom?.value) filters.document_date_from = fDocDateFrom.value;
+  if (fDocDateTo?.value) filters.document_date_to = fDocDateTo.value;
+  if (fDueDateFrom?.value) filters.due_date_from = fDueDateFrom.value;
+  if (fDueDateTo?.value) filters.due_date_to = fDueDateTo.value;
+  if (fMinAmount?.value && Number.isFinite(Number(fMinAmount.value))) filters.min_amount = Number(fMinAmount.value);
+  if (fMaxAmount?.value && Number.isFinite(Number(fMaxAmount.value))) filters.max_amount = Number(fMaxAmount.value);
+  return filters;
+}
+
+function applyFacetFilters(filters) {
+  const f = filters && typeof filters === "object" ? filters : {};
+  facetSelections.categories.clear();
+  facetSelections.issuers.clear();
+  facetSelections.labels.clear();
+
+  const setRadioValue = (container, name, value) => {
+    if (!container) return;
+    const el = container.querySelector(`input[name='${name}'][value='${CSS.escape(String(value || ""))}']`);
+    if (el) el.checked = true;
+  };
+
+  setRadioValue(facetStatus, "fStatusRadio", f.status || "");
+  setRadioValue(facetPaid, "fPaidRadio", f.paid || "");
+
+  (Array.isArray(f.categories) ? f.categories : []).forEach((x) => facetSelections.categories.add(String(x)));
+  (Array.isArray(f.issuers) ? f.issuers : []).forEach((x) => facetSelections.issuers.add(String(x)));
+  (Array.isArray(f.label_ids) ? f.label_ids : []).forEach((x) => facetSelections.labels.add(String(x)));
+
+  if (fDocDateFrom) fDocDateFrom.value = String(f.document_date_from || "");
+  if (fDocDateTo) fDocDateTo.value = String(f.document_date_to || "");
+  if (fDueDateFrom) fDueDateFrom.value = String(f.due_date_from || "");
+  if (fDueDateTo) fDueDateTo.value = String(f.due_date_to || "");
+
+  if (fMinAmount) fMinAmount.value = f.min_amount != null && Number.isFinite(Number(f.min_amount)) ? String(f.min_amount) : "";
+  if (fMaxAmount) fMaxAmount.value = f.max_amount != null && Number.isFinite(Number(f.max_amount)) ? String(f.max_amount) : "";
+
+  if (fMinAmountRange) {
+    fMinAmountRange.value = fMinAmount?.value || fMinAmountRange.min || "0";
+  }
+  if (fMaxAmountRange) {
+    fMaxAmountRange.value = fMaxAmount?.value || fMaxAmountRange.max || "0";
+  }
+}
+
+async function loadViews() {
+  if (!viewsList) return;
+  try {
+    const r = await authFetch("/api/views");
+    if (!r.ok) throw new Error("views load failed");
+    savedViews = await r.json();
+  } catch {
+    savedViews = [];
+  }
+  renderViews();
+}
+
+function renderViews() {
+  if (!viewsList) return;
+  if (!savedViews.length) {
+    viewsList.innerHTML = "<div class='panel'>Nog geen views. Stel filters in op Dashboard en sla op als view.</div>";
+    return;
+  }
+  viewsList.innerHTML = savedViews
+    .map((v) => {
+      const name = escapeHtml(v.name || "");
+      const meta = v.updated_at ? `Laatst aangepast: ${escapeHtml(formatDisplayDate(String(v.updated_at).slice(0, 10)))}` : "";
+      return `
+        <div class="view-card" data-view-id="${escapeHtml(v.id)}">
+          <button class="view-apply" type="button" data-apply-view="${escapeHtml(v.id)}">
+            <div class="view-title">${name}</div>
+            <div class="view-meta">${meta}</div>
+          </button>
+          <div class="view-actions">
+            <button class="view-delete" type="button" title="Verwijderen" aria-label="Verwijderen" data-delete-view="${escapeHtml(v.id)}">${trashIconSvg("trash-icon-inline")}</button>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+async function saveCurrentView() {
+  if (!savedViewName) return;
+  const name = (savedViewName.value || "").trim();
+  const filters = currentFacetFilters();
+  if (!name) {
+    showToast("Geef een naam voor de view.");
+    return;
+  }
+  if (!filters || !Object.keys(filters).length) {
+    showToast("Zet minstens 1 filter aan om een view op te slaan.");
+    return;
+  }
+  try {
+    const r = await authFetch("/api/views", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, filters }),
+    });
+    if (!r.ok) throw new Error("save view failed");
+    savedViewName.value = "";
+    showToast("View opgeslaan.");
+    await loadViews();
+  } catch (e) {
+    showToast("Kon view niet opslaan.");
+  }
+}
+
+async function deleteView(viewId) {
+  if (!viewId) return;
+  if (!confirm("View verwijderen?")) return;
+  try {
+    const r = await authFetch(`/api/views/${encodeURIComponent(viewId)}`, { method: "DELETE" });
+    if (!r.ok) throw new Error("delete failed");
+    showToast("View verwijderd.");
+    await loadViews();
+  } catch {
+    showToast("Kon view niet verwijderen.");
+  }
+}
+
+function applySavedView(viewId) {
+  const v = (savedViews || []).find((x) => String(x.id) === String(viewId));
+  if (!v) return;
+  applyFacetFilters(v.filters || {});
+  updateFacetOptionsFromDocs();
+  dashboardPage = 1;
+  renderDashboard();
+  setFacetsExpanded(true);
+  setTab("dashboard", { syncRoute: true, replaceRoute: true });
 }
 
 function currentTabId() {
@@ -945,10 +1214,212 @@ function setFacetsExpanded(expanded) {
 
 function renderUserBadge() {
   if (!userInfo || !currentUser) return;
+  const rawName = String(currentUser.name || "").trim();
+  const displayName = rawName.length > 20 ? `${rawName.slice(0, 19)}…` : rawName;
   const avatar = currentUser.avatar_path
     ? `<img class="mast-user-avatar" src="${escapeHtml(currentUser.avatar_path)}" alt="avatar" />`
     : "";
-  userInfo.innerHTML = `${avatar}<span class="mast-user-name">${escapeHtml(currentUser.name || "")}</span>`;
+  userInfo.innerHTML = `${avatar}<span class="mast-user-name">${escapeHtml(displayName)}</span>`;
+}
+
+function renderTenantSwitcher() {
+  if (!tenantSwitchWrap || !tenantSwitchSelect || !tenantFixedBadge) return;
+  const cleanTenantLabel = (name) => String(name || "").replace(/\s*\(default\)\s*$/i, "").trim();
+  const capChars = (n) => Math.max(6, Math.min(20, Number(n) || 0));
+  const role = String(currentUser?.role || "").toLowerCase();
+  const canSwitch = role === "superadmin";
+  const activeTenant = (tenants || []).find((t) => t.is_active);
+  const activeLabel = cleanTenantLabel(activeTenant?.name || currentUser?.tenant_name || "");
+  const fixedLabel = activeLabel || "Tenant";
+
+  tenantSwitchWrap.classList.remove("hidden");
+  tenantSwitchWrap.dataset.mode = canSwitch ? "dropdown" : "fixed";
+
+  if (!canSwitch) {
+    tenantSwitchSelect.classList.add("hidden");
+    tenantFixedBadge.classList.remove("hidden");
+    tenantSwitchSelect.innerHTML = "";
+    tenantFixedBadge.textContent = fixedLabel;
+    tenantSwitchWrap.style.setProperty("--tenant-chars", String(capChars(fixedLabel.length)));
+    return;
+  }
+
+  tenantSwitchSelect.classList.remove("hidden");
+  tenantFixedBadge.classList.add("hidden");
+  tenantFixedBadge.textContent = "";
+  tenantSwitchSelect.innerHTML = (tenants || [])
+    .map((t) => `<option value="${escapeHtml(t.id)}" ${t.is_active ? "selected" : ""}>${escapeHtml(cleanTenantLabel(t.name))}</option>`)
+    .join("");
+  const maxChars = capChars(
+    Math.max(
+      0,
+      ...(tenants || []).map((t) => cleanTenantLabel(t.name).length),
+      fixedLabel.length,
+    ),
+  );
+  tenantSwitchWrap.style.setProperty("--tenant-chars", String(maxChars));
+}
+
+function renderTenantsList() {
+  if (!tenantsList) return;
+  const canCreateTenants = !!currentUser?.is_bootstrap_admin;
+  if (createTenantBtn) createTenantBtn.disabled = !canCreateTenants;
+  tenantsList.innerHTML = (tenants || []).length
+    ? tenants
+        .map(
+          (t) => `
+            <article class="tenant-tile ${t.is_active ? "active" : ""}">
+              <div class="tenant-tile-main">
+                <h4 class="tenant-name-row">
+                  ${
+                    editingTenantId === String(t.id)
+                      ? `<input class="tenant-name-edit-input" data-tenant-name-input="${escapeHtml(t.id)}" type="text" value="${escapeHtml(editingTenantName || t.name || "")}" />`
+                      : `<span>${escapeHtml(t.name)}</span>`
+                  }
+                  <span class="tenant-name-tools">
+                    ${
+                      !canCreateTenants
+                        ? ""
+                        : editingTenantId === String(t.id)
+                        ? `<button class="mapping-icon-btn" data-save-tenant="${escapeHtml(t.id)}" type="button" title="Tenant naam opslaan" aria-label="Tenant naam opslaan">✓</button>`
+                        : `<button class="mapping-icon-btn" data-edit-tenant="${escapeHtml(t.id)}" type="button" title="Tenant naam aanpassen" aria-label="Tenant naam aanpassen">✎</button>`
+                    }
+                  </span>
+                </h4>
+                <p>${escapeHtml(t.slug)}</p>
+              </div>
+              <div class="tenant-tile-stats">
+                <span>${Number(t.users_count || 0)} gebruikers</span>
+                <span>${Number(t.admins_count || 0)} admins</span>
+                <span>${Number(t.documents_count || 0)} documenten</span>
+                <span>${Number(t.transactions_count || 0)} transacties</span>
+              </div>
+            </article>
+          `,
+        )
+        .join("")
+    : "<p>Nog geen tenants.</p>";
+}
+
+async function saveTenantName(tenantId, nameRaw) {
+  const id = String(tenantId || "").trim();
+  const name = String(nameRaw || "").trim();
+  if (!id) return;
+  if (!name) return alert("Tenant naam is verplicht");
+  const res = await authFetch(`/api/admin/tenants/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    return alert(err.detail || "Tenant aanpassen mislukt");
+  }
+  editingTenantId = "";
+  editingTenantName = "";
+  await loadTenants();
+  showToast("Tenant naam opgeslagen");
+}
+
+function selectedTenantIdForUserManager() {
+  const fromSelect = String(tenantUserTenantSelect?.value || "").trim();
+  if (fromSelect) return fromSelect;
+  const active = (tenants || []).find((t) => t.is_active);
+  return String(active?.id || "");
+}
+
+async function loadTenantUsersDirectory() {
+  if (!currentUser?.is_admin && !currentUser?.is_bootstrap_admin) {
+    tenantAllUsers = [];
+    tenantSelectedUsers = [];
+    renderTenantUserManager();
+    return;
+  }
+  const [allRes, selectedRes] = await Promise.all([
+    authFetch("/api/admin/tenant-users"),
+    authFetch(`/api/admin/tenants/${encodeURIComponent(selectedTenantIdForUserManager())}/users`),
+  ]);
+  tenantAllUsers = allRes.ok ? await allRes.json() : [];
+  tenantSelectedUsers = selectedRes.ok ? await selectedRes.json() : [];
+  renderTenantUserManager();
+}
+
+function renderTenantUserManager() {
+  if (!tenantUserTenantSelect || !tenantUserSelect || !tenantUserBadges) return;
+  const isAdminUser = !!(currentUser?.is_admin || currentUser?.is_bootstrap_admin);
+  if (!isAdminUser) {
+    tenantUserTenantSelect.innerHTML = "";
+    tenantUserSelect.innerHTML = "";
+    tenantUserBadges.innerHTML = "<small>Alleen admins.</small>";
+    return;
+  }
+  const canViewAllTenants = !!currentUser?.is_bootstrap_admin;
+  const selectedTid = selectedTenantIdForUserManager();
+  const tenantOptions = (tenants || []).filter((t) => canViewAllTenants || String(t.id) === String(currentUser.tenant_id || ""));
+  tenantUserTenantSelect.innerHTML = tenantOptions
+    .map((t) => `<option value="${escapeHtml(t.id)}" ${String(t.id) === selectedTid ? "selected" : ""}>${escapeHtml(t.name)} (${escapeHtml(t.slug)})</option>`)
+    .join("");
+  tenantUserTenantSelect.disabled = !canViewAllTenants;
+
+  const selectedSet = new Set((tenantSelectedUsers || []).map((u) => String(u.id || "")));
+  const candidates = (tenantAllUsers || [])
+    .filter((u) => !u.is_bootstrap_admin)
+    .filter((u) => !selectedSet.has(String(u.id || "")))
+    .sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "nl", { sensitivity: "base" }));
+  tenantUserSelect.innerHTML = candidates.length
+    ? candidates
+        .map((u) => `<option value="${escapeHtml(u.id)}">${escapeHtml(u.name)} (${escapeHtml(u.email)})</option>`)
+        .join("")
+    : '<option value="">Geen users beschikbaar</option>';
+  if (tenantAddUserBtn) tenantAddUserBtn.disabled = !candidates.length;
+
+  tenantUserBadges.innerHTML = (tenantSelectedUsers || []).length
+    ? tenantSelectedUsers
+        .map((u) => {
+          const locked = u.is_bootstrap_admin ? "true" : "false";
+          const removeBtn = u.is_bootstrap_admin
+            ? ""
+            : `<button class="mapping-chip-x-btn" data-tenant-remove-user="${escapeHtml(u.id)}" type="button" aria-label="User verwijderen uit tenant">x</button>`;
+          return `<span class="mapping-chip tenant-user-chip" data-tenant-user="${escapeHtml(u.id)}" data-locked="${locked}">
+              <span>${escapeHtml(`${u.name} (${u.email})`)}</span>
+              ${removeBtn}
+            </span>`;
+        })
+        .join("")
+    : "<small>Geen users in deze tenant.</small>";
+}
+
+async function addSelectedUserToTenant() {
+  const tenantId = selectedTenantIdForUserManager();
+  const userId = String(tenantUserSelect?.value || "").trim();
+  if (!tenantId || !userId) return;
+  const res = await authFetch(`/api/admin/tenants/${encodeURIComponent(tenantId)}/users/${encodeURIComponent(userId)}`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    return alert(err.detail || "User toevoegen mislukt");
+  }
+  await loadTenants();
+  await loadTenantUsersDirectory();
+  showToast("User toegevoegd aan tenant");
+}
+
+async function removeUserFromSelectedTenant(userId) {
+  const tenantId = selectedTenantIdForUserManager();
+  const uid = String(userId || "").trim();
+  if (!tenantId || !uid) return;
+  if (!window.confirm("User verwijderen uit deze tenant?")) return;
+  const res = await authFetch(`/api/admin/tenants/${encodeURIComponent(tenantId)}/users/${encodeURIComponent(uid)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    return alert(err.detail || "User verwijderen uit tenant mislukt");
+  }
+  await loadTenants();
+  await loadTenantUsersDirectory();
+  showToast("User verwijderd uit tenant");
 }
 
 function populateSelfProfile() {
@@ -1422,7 +1893,7 @@ function renderLabels() {
 }
 
 function renderUsers() {
-  if (!usersTiles || !userDetail || !editUserName || !editUserEmail || !editUserPassword || !editUserGroup) return;
+  if (!usersTiles || !userDetail || !editUserName || !editUserEmail || !editUserPassword || !editUserRole) return;
   const sortedUsers = [...users].sort((a, b) =>
     String(a.name || "").localeCompare(String(b.name || ""), "nl", { sensitivity: "base" }),
   );
@@ -1439,16 +1910,26 @@ function renderUsers() {
   usersTiles.innerHTML = sortedUsers
     .map((u) => {
       const active = u.id === selectedUserId ? "active" : "";
-      const firstGroupName = groups.find((g) => g.id === (u.group_ids?.[0] || ""))?.name || "Geen groep";
       const safeName = escapeHtml(u.name || u.email || "Onbekend");
       const safeEmail = escapeHtml(u.email || "");
+      const role = String(u.role || "").toLowerCase();
+      const roleBadge =
+        role === "superadmin"
+          ? `<span class="user-role-badge superadmin">Superadmin</span>`
+          : role === "admin"
+            ? `<span class="user-role-badge admin">Admin</span>`
+            : "";
+      const tenantLabel = escapeHtml(u.tenant_name || "Tenant");
       return `
         <button class="user-tile ${active}" data-user-tile="${u.id}" type="button">
           <span class="user-tile-main">
             <span class="user-tile-name">${safeName}</span>
             <span class="user-tile-email">${safeEmail}</span>
           </span>
-          <span class="user-group-badge">${escapeHtml(firstGroupName)}</span>
+          <span class="user-tile-badges">
+            ${roleBadge}
+            <span class="user-tenant-badge">${tenantLabel}</span>
+          </span>
         </button>
       `;
     })
@@ -1459,10 +1940,12 @@ function renderUsers() {
     userDetail.classList.add("hidden");
     return;
   }
-  const groupOptions = groups
-    .map((g) => `<option value="${g.id}">${escapeHtml(g.name)}</option>`)
-    .join("");
-  editUserGroup.innerHTML = `<option value="">Geen groep</option>${groupOptions}`;
+  const isBootstrap = !!currentUser?.is_bootstrap_admin;
+  editUserRole.innerHTML = `
+    ${isBootstrap ? '<option value="superadmin">Superadmin</option>' : ""}
+    <option value="admin">Admin</option>
+    <option value="gebruiker">Gebruiker</option>
+  `;
   userDetail.classList.remove("hidden");
   if (userDetailTitle) {
     userDetailTitle.textContent = `Gebruiker detail (${selectedUser.name || selectedUser.email || "Onbekend"})`;
@@ -1470,8 +1953,9 @@ function renderUsers() {
   editUserName.value = selectedUser.name || "";
   editUserEmail.value = selectedUser.email || "";
   editUserPassword.value = "";
-  editUserGroup.value = selectedUser.group_ids?.[0] || "";
-  if (deleteUserDetailBtn) deleteUserDetailBtn.disabled = !!selectedUser.is_bootstrap_admin;
+  editUserRole.value = String(selectedUser.role || "gebruiker").toLowerCase();
+  if (!isBootstrap && editUserRole.value === "superadmin") editUserRole.value = "admin";
+  if (deleteUserDetailBtn) deleteUserDetailBtn.disabled = !!selectedUser.is_bootstrap_admin && !isBootstrap;
 }
 
 function renderGroups() {
@@ -1484,7 +1968,7 @@ function renderGroups() {
         .map((g) => {
           const memberCount = (g.user_ids || []).length;
           const memberLabel = `${memberCount} ${memberCount === 1 ? "gebruiker" : "gebruikers"}`;
-          const fixedAdminGroup = String(g.name || "").trim().toLowerCase() === "administrators";
+          const fixedAdminGroup = String(g.name || "").trim().toLowerCase().startsWith("administrators");
           const disableDelete = fixedAdminGroup || memberCount > 0 ? "disabled" : "";
           return `
             <article class="group-tile">
@@ -1696,6 +2180,7 @@ function yearNumberFromDate(value) {
 }
 
 function categorizeBudgetTransaction(tx) {
+  if (tx?.category) return String(tx.category);
   const amount = Number(tx?.amount || 0);
   const flow = amount >= 0 ? "income" : "expense";
   const movementType = getBudgetTxMovementType(tx);
@@ -1733,7 +2218,6 @@ function categorizeBudgetTransaction(tx) {
     )
     .sort((a, b) => b.keyword.length - a.keyword.length);
   if (relaxedCandidates.length) return relaxedCandidates[0].category || "Ongecategoriseerd";
-  if (tx?.category) return String(tx.category);
 
   const movementNorm = String(movementType || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
   if (flow === "expense" && (movementNorm.includes("aanrekeningbeheerskost") || movementNorm.includes("beheerskost"))) {
@@ -2057,6 +2541,16 @@ function txDetailsRows(tx) {
     });
   }
 
+  // Fallback for transactions where raw csv_fields are missing/partial:
+  // keep the modal useful with the canonical CSV columns from normalized tx fields.
+  const hasDataKey = (label) => rows.some((r) => String(r.key || "").trim().toLowerCase() === String(label || "").trim().toLowerCase());
+  if (!hasDataKey("Uitvoeringsdatum")) pushDataRow("Uitvoeringsdatum", tx?.booking_date);
+  if (!hasDataKey("Valutadatum")) pushDataRow("Valutadatum", tx?.value_date);
+  if (!hasDataKey("Tegenpartij naam")) pushDataRow("Tegenpartij naam", tx?.counterparty_name);
+  if (!hasDataKey("Mededeling")) pushDataRow("Mededeling", tx?.remittance_information);
+  if (!hasDataKey("Bedrag")) pushDataRow("Bedrag", tx?.amount);
+  if (!hasDataKey("Munt")) pushDataRow("Munt", tx?.currency);
+
   const movementType = getBudgetTxMovementType(tx);
   if (movementType) pushSystemRow("soort_beweging", movementType);
 
@@ -2074,6 +2568,9 @@ function txDetailsRows(tx) {
     flow: tx?.flow,
     category: tx?.category || categorizeBudgetTransaction(tx),
     source: tx?.source,
+    auto_mapping: tx?.auto_mapping,
+    llm_mapping: tx?.llm_mapping,
+    manual_mapping: tx?.manual_mapping,
     reason: tx?.reason,
     created_at: tx?.created_at,
   };
@@ -2093,11 +2590,33 @@ function txDetailsRows(tx) {
 function getBudgetTxByExternalId(externalId) {
   const id = String(externalId || "").trim();
   if (!id) return null;
-  return (
-    budgetAnalyzedTransactions.find((t) => String(t?.external_transaction_id || "") === id) ||
-    bankCsvTransactions.find((t) => String(t?.external_transaction_id || "") === id) ||
-    null
-  );
+  const analyzed = budgetAnalyzedTransactions.find((t) => String(t?.external_transaction_id || "") === id) || null;
+  const csv = bankCsvTransactions.find((t) => String(t?.external_transaction_id || "") === id) || null;
+  if (analyzed && csv) {
+    // Prefer original CSV payload for detail fields, but keep analyzed categorization state.
+    return {
+      ...csv,
+      ...analyzed,
+      raw_json: csv.raw_json ?? analyzed.raw_json,
+      booking_date: csv.booking_date ?? analyzed.booking_date,
+      value_date: csv.value_date ?? analyzed.value_date,
+      amount: csv.amount ?? analyzed.amount,
+      currency: csv.currency ?? analyzed.currency,
+      counterparty_name: csv.counterparty_name ?? analyzed.counterparty_name,
+      remittance_information: csv.remittance_information ?? analyzed.remittance_information,
+      movement_type: csv.movement_type ?? analyzed.movement_type,
+      category: analyzed.category ?? csv.category,
+      flow: analyzed.flow ?? csv.flow,
+      source: analyzed.source ?? csv.source,
+      auto_mapping: analyzed.auto_mapping ?? csv.auto_mapping,
+      llm_mapping: analyzed.llm_mapping ?? csv.llm_mapping,
+      manual_mapping: analyzed.manual_mapping ?? csv.manual_mapping,
+      reason: analyzed.reason ?? csv.reason,
+      linked_document_id: analyzed.linked_document_id ?? csv.linked_document_id,
+      linked_document_title: analyzed.linked_document_title ?? csv.linked_document_title,
+    };
+  }
+  return analyzed || csv || null;
 }
 
 function openBudgetTxModalById(externalId) {
@@ -2282,7 +2801,7 @@ function renderBudgetAnalysis() {
       budgetPromptInfo.textContent = `LLM analyse actief (${budgetAnalysisMeta.provider || "-"} · ${budgetAnalysisMeta.model || "-"}), ${budgetAnalysisMeta.mappings_count || 0} mapping(s).`;
     } else {
       budgetPromptInfo.textContent = bankCsvPrompt?.value?.trim()
-        ? `Nog geen LLM analyse. Klik Analyze. (${bankCsvMappings.length} mapping(s) beschikbaar)`
+        ? `Nog geen LLM analyse. Klik Analyze. (${bankCsvMappings.length} mapping(s) beschikbaar).`
         : `Nog geen LLM analyse. Klik Analyze.`;
     }
   }
@@ -2418,7 +2937,14 @@ function renderBudgetAnalysis() {
                     const sign = flow === "income" ? "+" : "-";
                     const txCategory = categorizeBudgetTransaction(t);
                     const categorySource = String(t.source || "").trim().toLowerCase();
-                    const isAiCategory = categorySource === "llm";
+                    const sourceBadge =
+                      categorySource === "llm"
+                        ? `<span class="budget-category-ai" title="AI mapping">AI</span>`
+                        : categorySource === "mapping"
+                          ? `<span class="budget-category-map" title="Expliciete mapping">MAP</span>`
+                          : categorySource === "manual"
+                            ? `<span class="budget-category-manual" title="Manuele mapping">MAN</span>`
+                            : "";
                     const linkedDocId = String(t.linked_document_id || "").trim();
                     const linkedDocTitle = String(t.linked_document_title || "Document").trim();
                     const docBadge = linkedDocId
@@ -2433,9 +2959,7 @@ function renderBudgetAnalysis() {
                           <span class="budget-instantie-value" title="${escapeHtml(instantieFull)}">${escapeHtml(instantieShort)}</span>
                         </div>
                         <div class="budget-detail-cell">
-                          <span class="budget-category-pill">${escapeHtml(txCategory)}${
-                            isAiCategory ? `<span class="budget-category-ai" title="AI mapping">AI</span>` : ""
-                          }</span>
+                          <span class="budget-category-pill">${escapeHtml(txCategory)}${sourceBadge}</span>
                         </div>
                         <div class="budget-detail-cell">${docBadge}</div>
                         <div class="budget-detail-cell right">
@@ -2456,6 +2980,19 @@ function renderBudgetAnalysis() {
 
 async function loadBudgetAnalysis() {
   await loadBankCsvTransactions();
+  try {
+    const latestRes = await authFetch("/api/bank/budget/latest");
+    if (latestRes.ok) {
+      const latest = await latestRes.json().catch(() => ({}));
+      budgetAnalysisMeta = latest || {};
+      budgetAnalyzedTransactions = Array.isArray(latest?.transactions) ? latest.transactions : [];
+    } else if (latestRes.status === 404) {
+      budgetAnalysisMeta = {};
+      budgetAnalyzedTransactions = [];
+    }
+  } catch (_) {
+    // Fallback to CSV-only rendering when latest analyzed data is unavailable.
+  }
   if (bankCsvTransactions.length) {
     const res = await authFetch("/api/bank/import-csv/mark-parsed", { method: "POST" });
     if (res.ok) {
@@ -2501,57 +3038,79 @@ function stopBudgetAnalyzeProgressPolling() {
 }
 
 async function analyzeBudgetWithLLM() {
+  const proceed = window.confirm(
+    "Analyze her-evalueert alle bestaande transacties. Manuele categorie-aanpassingen kunnen overschreven worden. Doorgaan?",
+  );
+  if (!proceed) return;
   if (budgetAnalyzeBtn) {
     budgetAnalyzeBtn.disabled = true;
     budgetAnalyzeBtn.textContent = "Analyzing...";
   }
   startBudgetAnalyzeProgressPolling();
   try {
-    const res = await authFetch("/api/bank/budget/analyze", { method: "POST" });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || "Budget analyse mislukt");
+    const startRes = await authFetch("/api/bank/budget/analyze/start", { method: "POST" });
+    if (!startRes.ok) {
+      const err = await startRes.json().catch(() => ({}));
+      throw new Error(err.detail || "Budget analyse start mislukt");
     }
-    const data = await res.json();
-    budgetAnalysisMeta = data || {};
-    budgetAnalyzedTransactions = Array.isArray(data?.transactions) ? data.transactions : [];
-    await loadBankImportedCsvFiles();
-    renderBudgetAnalysis();
-    showToast("Budget analyse klaar");
+    const startData = await startRes.json().catch(() => ({}));
+    const jobId = String(startData?.job_id || "").trim();
+    if (!jobId) throw new Error("Geen job-id ontvangen");
+
+    const poll = async () => {
+      const jr = await authFetch(`/api/jobs/${encodeURIComponent(jobId)}`);
+      if (!jr.ok) return;
+      const job = await jr.json().catch(() => ({}));
+      if (budgetAnalyzeProgress) {
+        const processed = Number(job?.processed || 0);
+        const total = Number(job?.total || 0);
+        renderBudgetAnalyzeProgress(processed, total);
+      }
+      const status = String(job?.status || "");
+      if (status === "done") {
+        if (analyzeJobPollTimer) {
+          clearInterval(analyzeJobPollTimer);
+          analyzeJobPollTimer = null;
+        }
+        const data = job?.result || {};
+        budgetAnalysisMeta = data || {};
+        budgetAnalyzedTransactions = Array.isArray(data?.transactions) ? data.transactions : [];
+        await loadBankImportedCsvFiles();
+        renderBudgetAnalysis();
+        showToast("Budget analyse klaar");
+        stopBudgetAnalyzeProgressPolling();
+        if (budgetAnalyzeBtn) {
+          budgetAnalyzeBtn.textContent = "Analyze";
+          budgetAnalyzeBtn.disabled = false;
+        }
+      } else if (status === "failed") {
+        if (analyzeJobPollTimer) {
+          clearInterval(analyzeJobPollTimer);
+          analyzeJobPollTimer = null;
+        }
+        stopBudgetAnalyzeProgressPolling();
+        if (budgetAnalyzeBtn) {
+          budgetAnalyzeBtn.textContent = "Analyze";
+          budgetAnalyzeBtn.disabled = false;
+        }
+        alert(job?.error || "Budget analyse mislukt");
+      }
+    };
+    if (analyzeJobPollTimer) clearInterval(analyzeJobPollTimer);
+    analyzeJobPollTimer = setInterval(() => {
+      void poll();
+    }, 900);
+    await poll();
   } catch (err) {
+    if (analyzeJobPollTimer) {
+      clearInterval(analyzeJobPollTimer);
+      analyzeJobPollTimer = null;
+    }
     alert(err?.message || "Budget analyse mislukt");
-  } finally {
     stopBudgetAnalyzeProgressPolling();
     if (budgetAnalyzeBtn) {
       budgetAnalyzeBtn.textContent = "Analyze";
       budgetAnalyzeBtn.disabled = false;
-    }
-  }
-}
-
-async function refreshBudgetWithMappings() {
-  if (budgetRefreshBtn) {
-    budgetRefreshBtn.disabled = true;
-    budgetRefreshBtn.textContent = "Refreshing...";
-  }
-  try {
-    const res = await authFetch("/api/bank/budget/refresh", { method: "POST" });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || "Budget refresh mislukt");
-    }
-    const data = await res.json();
-    budgetAnalysisMeta = data || {};
-    budgetAnalyzedTransactions = Array.isArray(data?.transactions) ? data.transactions : [];
-    await loadBankImportedCsvFiles();
-    renderBudgetAnalysis();
-    showToast("Budget refresh klaar");
-  } catch (err) {
-    alert(err?.message || "Budget refresh mislukt");
-  } finally {
-    if (budgetRefreshBtn) {
-      budgetRefreshBtn.textContent = "Refresh";
-      budgetRefreshBtn.disabled = false;
     }
   }
 }
@@ -2572,23 +3131,18 @@ async function saveBudgetTransactionCategory(externalTransactionId, category) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || "Categorie opslaan mislukt");
   }
-  const mapped = await res.json().catch(() => ({}));
-  const keyword = String(mapped.keyword || "").trim();
-  const flow = String(mapped.flow || "all").trim().toLowerCase();
-  if (keyword) {
-    const idx = bankCsvMappings.findIndex(
-      (m) => String(m.keyword || "").trim().toLowerCase() === keyword.toLowerCase() && String(m.flow || "all").trim().toLowerCase() === flow,
-    );
-    if (idx >= 0) {
-      bankCsvMappings[idx] = { ...bankCsvMappings[idx], category: targetCategory };
-    } else {
-      bankCsvMappings.unshift({ keyword, flow, category: targetCategory });
-    }
-  }
+  await res.json().catch(() => ({}));
   for (const arr of [budgetAnalyzedTransactions, bankCsvTransactions]) {
     for (let i = 0; i < arr.length; i += 1) {
       if (String(arr[i]?.external_transaction_id || "") === externalId) {
-        arr[i] = { ...arr[i], category: targetCategory, source: "manual" };
+        arr[i] = {
+          ...arr[i],
+          category: targetCategory,
+          source: "manual",
+          auto_mapping: false,
+          llm_mapping: false,
+          manual_mapping: true,
+        };
       }
     }
   }
@@ -2731,18 +3285,51 @@ async function checkBankPaymentsForDocuments() {
   const previous = checkBankBtn.textContent;
   checkBankBtn.textContent = "CHECKING...";
   try {
-    const res = await authFetch("/api/documents/check-bank", { method: "POST" });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.detail || "CHECK BANK mislukt");
+    const startRes = await authFetch("/api/documents/check-bank/start", { method: "POST" });
+    const startData = await startRes.json().catch(() => ({}));
+    if (!startRes.ok) {
+      throw new Error(startData.detail || "CHECK BANK start mislukt");
     }
-    await loadDocs();
-    const matched = Number(data.matched || 0);
-    const checked = Number(data.checked || 0);
-    showToast(`Bank check klaar: ${matched}/${checked} gematcht`);
+    const jobId = String(startData?.job_id || "").trim();
+    if (!jobId) throw new Error("Geen job-id ontvangen");
+
+    const poll = async () => {
+      const jr = await authFetch(`/api/jobs/${encodeURIComponent(jobId)}`);
+      if (!jr.ok) return;
+      const job = await jr.json().catch(() => ({}));
+      const processed = Number(job?.processed || 0);
+      const total = Number(job?.total || 0);
+      if (total > 0) checkBankBtn.textContent = `CHECKING ${processed}/${total}`;
+      const status = String(job?.status || "");
+      if (status === "done") {
+        if (checkBankJobPollTimer) {
+          clearInterval(checkBankJobPollTimer);
+          checkBankJobPollTimer = null;
+        }
+        const data = job?.result || {};
+        await loadDocs();
+        const matched = Number(data.matched || 0);
+        const checked = Number(data.checked || 0);
+        showToast(`Bank check klaar: ${matched}/${checked} gematcht`);
+        checkBankBtn.textContent = previous || "CHECK BANK";
+        checkBankBtn.disabled = false;
+      } else if (status === "failed") {
+        if (checkBankJobPollTimer) {
+          clearInterval(checkBankJobPollTimer);
+          checkBankJobPollTimer = null;
+        }
+        checkBankBtn.textContent = previous || "CHECK BANK";
+        checkBankBtn.disabled = false;
+        alert(job?.error || "CHECK BANK mislukt");
+      }
+    };
+    if (checkBankJobPollTimer) clearInterval(checkBankJobPollTimer);
+    checkBankJobPollTimer = setInterval(() => {
+      void poll();
+    }, 750);
+    await poll();
   } catch (err) {
     alert(err?.message || "CHECK BANK mislukt");
-  } finally {
     checkBankBtn.textContent = previous || "CHECK BANK";
     checkBankBtn.disabled = false;
   }
@@ -2759,7 +3346,18 @@ async function loadGroups() {
   const res = await authFetch("/api/groups");
   groups = res.ok ? await res.json() : [];
   setOptions(labelGroup, groups);
-  setOptions(newUserGroups, groups, "id", "name", true, "Selecteer groep");
+  if (!GROUPS_ENABLED && labelGroup) {
+    labelGroup.classList.add("hidden");
+    labelGroup.value = groups[0]?.id || "";
+  }
+  if (newUserRole) {
+    const canSetSuperadmin = !!currentUser?.is_bootstrap_admin;
+    newUserRole.innerHTML = `
+      ${canSetSuperadmin ? '<option value="superadmin">Superadmin</option>' : ""}
+      <option value="admin">Admin</option>
+      <option value="gebruiker" selected>Gebruiker</option>
+    `;
+  }
 }
 
 async function loadLabels() {
@@ -2998,6 +3596,62 @@ function deleteBankMappingCategory(idx) {
   renderBankCsvMappings();
 }
 
+async function loadTenants() {
+  if (!currentUser?.is_admin && !currentUser?.is_bootstrap_admin) {
+    tenants = [];
+    renderTenantSwitcher();
+    renderTenantsList();
+    await loadTenantUsersDirectory();
+    return;
+  }
+  const res = await authFetch("/api/admin/tenants");
+  tenants = res.ok ? await res.json() : [];
+  renderTenantSwitcher();
+  renderTenantsList();
+  await loadTenantUsersDirectory();
+}
+
+async function switchTenant(tenantId) {
+  const id = String(tenantId || "").trim();
+  if (!id || !currentUser?.is_bootstrap_admin) return;
+  const active = tenants.find((t) => t.is_active);
+  if (active && String(active.id) === id) return;
+  const res = await authFetch("/api/auth/switch-tenant", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tenant_id: id }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    return alert(err.detail || "Tenant switch mislukt");
+  }
+  currentUser = await res.json();
+  await bootstrap();
+  showToast("Tenant gewisseld");
+}
+
+async function createTenant() {
+  if (!currentUser?.is_bootstrap_admin) return;
+  const payload = {
+    name: String(tenantNameInput?.value || "").trim(),
+    slug: String(tenantSlugInput?.value || "").trim() || null,
+  };
+  if (!payload.name) return alert("Tenant naam is verplicht");
+  const res = await authFetch("/api/admin/tenants", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    return alert(err.detail || "Tenant aanmaken mislukt");
+  }
+  if (tenantNameInput) tenantNameInput.value = "";
+  if (tenantSlugInput) tenantSlugInput.value = "";
+  await loadTenants();
+  showToast("Tenant aangemaakt");
+}
+
 async function loadAdminUsers() {
   if (!currentUser?.is_admin) return;
   const res = await authFetch("/api/admin/users");
@@ -3009,7 +3663,14 @@ async function loadAdminGroups() {
   if (!currentUser?.is_admin) return;
   const res = await authFetch("/api/admin/groups");
   groups = res.ok ? await res.json() : groups;
-  setOptions(newUserGroups, groups, "id", "name", true, "Selecteer groep");
+  if (newUserRole) {
+    const canSetSuperadmin = !!currentUser?.is_bootstrap_admin;
+    newUserRole.innerHTML = `
+      ${canSetSuperadmin ? '<option value="superadmin">Superadmin</option>' : ""}
+      <option value="admin">Admin</option>
+      <option value="gebruiker" selected>Gebruiker</option>
+    `;
+  }
   setOptions(labelGroup, groups);
   renderGroups();
 }
@@ -3053,6 +3714,11 @@ async function loadIntegrations() {
   mailAttachmentTypes = normalizeAttachmentTypes(d.mail_ingest_attachment_types || "pdf");
   if (!mailAttachmentTypes.length) mailAttachmentTypes = ["pdf"];
   renderMailAttachmentTypes();
+  iSmtpServer.value = d.smtp_server || "";
+  iSmtpPort.value = String(d.smtp_port || 587);
+  iSmtpUsername.value = d.smtp_username || "";
+  iSmtpSenderEmail.value = d.smtp_sender_email || "";
+  iSmtpPassword.value = "";
   setOptions(iMailGroup, groups, "id", "name", true, "Automatisch (admin groep)");
   iMailGroup.value = d.mail_ingest_group_id || "";
   iBankProvider.value = d.bank_provider || "vdk";
@@ -3065,6 +3731,7 @@ async function loadIntegrations() {
   iBnpApiKeyStatus.textContent = d.has_bnp_api_key ? "API key: ingesteld" : "API key: niet ingesteld";
   iBnpPasswordStatus.textContent = d.has_bnp_password ? "Password: ingesteld" : "Password: niet ingesteld";
   iMailPasswordStatus.textContent = d.has_mail_imap_password ? "Mail password: ingesteld" : "Mail password: niet ingesteld";
+  iSmtpPasswordStatus.textContent = d.has_smtp_password ? "SMTP password: ingesteld" : "SMTP password: niet ingesteld";
   bankCsvMappings = Array.isArray(d.bank_csv_mappings) ? d.bank_csv_mappings.map((m) => ({
     keyword: String(m.keyword || ""),
     flow: ["income", "expense", "all"].includes(String(m.flow || "").toLowerCase()) ? String(m.flow || "").toLowerCase() : "all",
@@ -3408,16 +4075,18 @@ async function createUser() {
   const email = newUserEmail.value.trim();
   const name = newUserName.value.trim();
   const password = newUserPassword.value;
-  const groupId = newUserGroups.value || "";
-  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  const role = String(newUserRole?.value || "gebruiker").toLowerCase();
   if (!name) return alert("Naam is verplicht");
-  if (!emailValid) return alert("Email formaat is ongeldig");
+  if (!email) return alert("Email/login is verplicht");
   if (!password) return alert("Wachtwoord is verplicht");
+  if (!currentUser?.is_bootstrap_admin && role === "superadmin") {
+    return alert("Admin kan geen superadmin aanmaken");
+  }
   const payload = {
     email,
     name,
     password,
-    group_ids: groupId ? [groupId] : [],
+    role,
   };
   const res = await authFetch("/api/admin/users", {
     method: "POST",
@@ -3439,16 +4108,18 @@ async function saveExistingUser(userId = selectedUserId) {
   const email = (editUserEmail?.value || "").trim();
   const name = (editUserName?.value || "").trim();
   const password = (editUserPassword?.value || "").trim();
-  const groupId = (editUserGroup?.value || "").trim();
-  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  const role = String(editUserRole?.value || "gebruiker").toLowerCase();
   if (!name) return alert("Naam is verplicht");
-  if (!emailValid) return alert("Email formaat is ongeldig");
+  if (!email) return alert("Email/login is verplicht");
+  if (!currentUser?.is_bootstrap_admin && role === "superadmin") {
+    return alert("Admin kan geen superadmin toekennen");
+  }
 
   const payload = {
     email,
     name,
     password: password || null,
-    group_id: groupId || null,
+    role,
   };
   const res = await authFetch(`/api/admin/users/${encodeURIComponent(userId)}`, {
     method: "PUT",
@@ -3503,7 +4174,7 @@ async function deleteGroup(groupId) {
   const group = groups.find((g) => g.id === groupId);
   if (!group) return;
   const memberCount = (group.user_ids || []).length;
-  if (String(group.name || "").trim().toLowerCase() === "administrators") {
+  if (String(group.name || "").trim().toLowerCase().startsWith("administrators")) {
     return alert("De groep Administrators kan niet verwijderd worden.");
   }
   if (memberCount > 0) {
@@ -3563,6 +4234,11 @@ async function saveIntegrations() {
     mail_ingest_frequency_minutes: Math.max(0, Number(iMailFrequencyMinutes?.value || 0) || 0),
     mail_ingest_group_id: (iMailGroup?.value || "").trim() || null,
     mail_ingest_attachment_types: (mailAttachmentTypes || []).join(",") || "pdf",
+    smtp_server: (iSmtpServer?.value || "").trim(),
+    smtp_port: Number(iSmtpPort?.value || 587) || 587,
+    smtp_username: (iSmtpUsername?.value || "").trim(),
+    smtp_sender_email: (iSmtpSenderEmail?.value || "").trim(),
+    smtp_password: (iSmtpPassword?.value || "").trim(),
     default_ocr_provider: iDefaultOcr.value,
   };
   const res = await authFetch("/api/admin/integrations", {
@@ -3583,6 +4259,7 @@ async function saveIntegrations() {
   iBnpApiKey.value = "";
   iBnpPassword.value = "";
   iMailPassword.value = "";
+  if (iSmtpPassword) iSmtpPassword.value = "";
   await loadIntegrations();
   await loadProviders();
   alert("Integraties opgeslagen");
@@ -3648,6 +4325,7 @@ async function bootstrap() {
   if (!token) {
     loginView.classList.remove("hidden");
     appView.classList.add("hidden");
+    syncAuthModeFromHash();
     return;
   }
 
@@ -3658,9 +4336,19 @@ async function bootstrap() {
   loginView.classList.add("hidden");
   appView.classList.remove("hidden");
   renderUserBadge();
+  renderTenantSwitcher();
   const isAdminUser = !!(currentUser.is_admin ?? currentUser.is_bootstrap_admin);
   adminMenuWrap.classList.toggle("hidden", !isAdminUser);
-  bankMenuWrap?.classList.toggle("hidden", !isAdminUser);
+  bankMenuWrap?.classList.remove("hidden");
+
+  if (!GROUPS_ENABLED) {
+    document.querySelectorAll('[data-tab="groups"], [data-tab="admin-groups"]').forEach((el) => el.classList.add("hidden"));
+    document.getElementById("tab-admin-groups")?.classList.add("hidden");
+  }
+  document.querySelectorAll('[data-tab="bank-import"], [data-tab="bank-settings"], [data-tab="bank-api"]').forEach((el) => {
+    if (!isAdminUser) el.classList.add("hidden");
+    else el.classList.remove("hidden");
+  });
 
   await loadGroups();
   await loadCategories();
@@ -3669,11 +4357,11 @@ async function bootstrap() {
   await loadDocs();
 
   if (isAdminUser) {
-    await loadAdminGroups();
     await loadAdminUsers();
     await loadIntegrations();
     await loadBankAccounts();
     await loadBankImportedCsvFiles();
+    await loadTenants();
   }
 
   if (!location.hash) {
@@ -3689,26 +4377,145 @@ async function bootstrap() {
   }, 6000);
 }
 
+function authResetPayloadFromHash() {
+  const raw = String(location.hash || "");
+  if (!raw.toLowerCase().startsWith("#reset-password")) return null;
+  const qIdx = raw.indexOf("?");
+  if (qIdx < 0) return {};
+  const params = new URLSearchParams(raw.slice(qIdx + 1));
+  return {
+    token: String(params.get("token") || ""),
+    email: String(params.get("email") || ""),
+  };
+}
+
+function setAuthMode(mode) {
+  const m = String(mode || "login").toLowerCase();
+  const isSignup = m === "signup";
+  const isForgot = m === "forgot";
+  const isReset = m === "reset";
+  loginForm?.classList.toggle("hidden", isSignup || isForgot || isReset);
+  signupForm?.classList.toggle("hidden", !isSignup);
+  forgotForm?.classList.toggle("hidden", !isForgot);
+  resetPasswordForm?.classList.toggle("hidden", !isReset);
+  authModeLoginBtn?.classList.toggle("active", !isSignup);
+  authModeSignupBtn?.classList.toggle("active", isSignup);
+}
+
+function syncAuthModeFromHash() {
+  const payload = authResetPayloadFromHash();
+  if (payload) {
+    setAuthMode("reset");
+    if (resetEmailInput) resetEmailInput.value = payload.email || "";
+    if (resetPasswordInput) resetPasswordInput.value = "";
+    if (resetConfirmPasswordInput) resetConfirmPasswordInput.value = "";
+    return;
+  }
+  setAuthMode("login");
+}
+
 async function login() {
   const res = await fetch("/api/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email: emailInput.value.trim(), password: passwordInput.value }),
   });
-  if (!res.ok) return alert("Login mislukt");
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    return alert(err.detail || "Login mislukt");
+  }
   const data = await res.json();
   token = data.token;
   localStorage.setItem("token", token);
   await bootstrap();
 }
 
+async function signup() {
+  const name = (signupNameInput?.value || "").trim();
+  const email = (signupEmailInput?.value || "").trim();
+  const password = signupPasswordInput?.value || "";
+  const confirm = signupPasswordConfirmInput?.value || "";
+
+  if (!name) return alert("Naam is verplicht");
+  if (!email || !email.includes("@")) return alert("Geef een geldig emailadres");
+  if (password.length < 8) return alert("Wachtwoord moet minstens 8 karakters hebben");
+  if (password !== confirm) return alert("Wachtwoorden komen niet overeen");
+
+  const res = await fetch("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, email, password }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    return alert(err.detail || "Signup mislukt");
+  }
+  const data = await res.json();
+  token = data.token;
+  localStorage.setItem("token", token);
+  await bootstrap();
+}
+
+async function requestPasswordReset() {
+  const email = (forgotEmailInput?.value || "").trim();
+  if (!email || !email.includes("@")) return alert("Geef een geldig emailadres");
+  const res = await fetch("/api/auth/forgot-password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    return alert(err.detail || "Reset aanvraag mislukt");
+  }
+  alert("Als de gebruiker bestaat, is een resetlink verstuurd.");
+  setAuthMode("login");
+}
+
+async function setNewPassword() {
+  const resetHash = authResetPayloadFromHash() || {};
+  const tokenParam = String(resetHash.token || "").trim();
+  const email = (resetEmailInput?.value || "").trim();
+  const password = resetPasswordInput?.value || "";
+  const confirmPassword = resetConfirmPasswordInput?.value || "";
+  if (!email || !email.includes("@")) return alert("Geef een geldig emailadres");
+  if (!tokenParam) return alert("Reset link is ongeldig");
+  if (password.length < 8) return alert("Wachtwoord moet minstens 8 karakters hebben");
+  if (password !== confirmPassword) return alert("Wachtwoorden komen niet overeen");
+
+  const res = await fetch("/api/auth/reset-password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      email,
+      token: tokenParam,
+      password,
+      confirm_password: confirmPassword,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    return alert(err.detail || "Wachtwoord instellen mislukt");
+  }
+  if (resetPasswordInput) resetPasswordInput.value = "";
+  if (resetConfirmPasswordInput) resetConfirmPasswordInput.value = "";
+  if (location.hash && location.hash.toLowerCase().startsWith("#reset-password")) {
+    history.replaceState(null, "", location.pathname + location.search);
+  }
+  alert("Wachtwoord aangepast. Je kan nu inloggen.");
+  setAuthMode("login");
+}
+
 function logout() {
   token = "";
   currentUser = null;
+  tenants = [];
   selectedActiveIds.clear();
   selectedTrashIds.clear();
   localStorage.removeItem("token");
   clearInterval(pollTimer);
+  renderTenantSwitcher();
+  renderTenantsList();
   loginView.classList.remove("hidden");
   appView.classList.add("hidden");
 }
@@ -3719,6 +4526,25 @@ menuItems.forEach((item) =>
     if (isMobileLayout()) closeMobileNav();
   }),
 );
+
+if (saveViewBtn) {
+  saveViewBtn.addEventListener("click", () => void saveCurrentView());
+}
+
+if (viewsList) {
+  viewsList.addEventListener("click", (e) => {
+    const t = e.target;
+    const applyBtn = t?.closest?.("[data-apply-view]");
+    const delBtn = t?.closest?.("[data-delete-view]");
+    if (applyBtn?.dataset?.applyView) applySavedView(applyBtn.dataset.applyView);
+    if (delBtn?.dataset?.deleteView) void deleteView(delBtn.dataset.deleteView);
+  });
+}
+
+if (auditRefreshBtn) {
+  auditRefreshBtn.addEventListener("click", () => void loadAudit());
+}
+
 if (mastHomeLink) {
   mastHomeLink.addEventListener("click", (e) => {
     e.preventDefault();
@@ -3734,7 +4560,47 @@ if (userInfo) {
     }
   });
 }
-loginBtn.addEventListener("click", login);
+if (tenantSwitchSelect) {
+  tenantSwitchSelect.addEventListener("change", () => {
+    void switchTenant(tenantSwitchSelect.value);
+  });
+}
+if (loginForm) {
+  loginForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    void login();
+  });
+}
+if (signupForm) {
+  signupForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    void signup();
+  });
+}
+if (forgotForm) {
+  forgotForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    void requestPasswordReset();
+  });
+}
+if (resetPasswordForm) {
+  resetPasswordForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    void setNewPassword();
+  });
+}
+authModeLoginBtn?.addEventListener("click", () => setAuthMode("login"));
+authModeSignupBtn?.addEventListener("click", () => setAuthMode("signup"));
+switchToSignupLink?.addEventListener("click", () => setAuthMode("signup"));
+switchToLoginLink?.addEventListener("click", () => setAuthMode("login"));
+forgotPasswordLink?.addEventListener("click", () => setAuthMode("forgot"));
+switchFromForgotToLoginLink?.addEventListener("click", () => setAuthMode("login"));
+switchFromResetToLoginLink?.addEventListener("click", () => {
+  if (location.hash && location.hash.toLowerCase().startsWith("#reset-password")) {
+    history.replaceState(null, "", location.pathname + location.search);
+  }
+  setAuthMode("login");
+});
 logoutBtn.addEventListener("click", logout);
 mobileMenuBtn.addEventListener("click", toggleMobileNav);
 mobileNavBackdrop.addEventListener("click", closeMobileNav);
@@ -3748,6 +4614,10 @@ window.addEventListener("resize", () => {
 });
 window.addEventListener("hashchange", () => {
   if (ignoreHashChange) return;
+  if (!token) {
+    syncAuthModeFromHash();
+    return;
+  }
   applyRouteFromHash();
 });
 refreshBtn.addEventListener("click", async () => {
@@ -3759,6 +4629,7 @@ if (facetToggleBtn) {
 }
 setFacetsExpanded(false);
 applyBankFeatureVisibility();
+syncAuthModeFromHash();
 
 searchInput.addEventListener("input", () => {
   renderSearchSuggestions();
@@ -4141,6 +5012,70 @@ if (deleteUserDetailBtn) {
 if (saveSelfBtn) {
   saveSelfBtn.addEventListener("click", saveOwnProfile);
 }
+if (createTenantBtn) {
+  createTenantBtn.addEventListener("click", () => {
+    void createTenant();
+  });
+}
+if (tenantUserTenantSelect) {
+  tenantUserTenantSelect.addEventListener("change", () => {
+    void loadTenantUsersDirectory();
+  });
+}
+if (tenantAddUserBtn) {
+  tenantAddUserBtn.addEventListener("click", () => {
+    void addSelectedUserToTenant();
+  });
+}
+if (tenantUserBadges) {
+  tenantUserBadges.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-tenant-remove-user]");
+    if (!btn) return;
+    void removeUserFromSelectedTenant(btn.dataset.tenantRemoveUser || "");
+  });
+}
+if (tenantsList) {
+  tenantsList.addEventListener("click", (e) => {
+    const editBtn = e.target.closest("[data-edit-tenant]");
+    if (editBtn) {
+      const tenantId = String(editBtn.dataset.editTenant || "").trim();
+      const row = tenants.find((t) => String(t.id) === tenantId);
+      if (!tenantId || !row) return;
+      editingTenantId = tenantId;
+      editingTenantName = String(row.name || "");
+      renderTenantsList();
+      return;
+    }
+    const saveBtn = e.target.closest("[data-save-tenant]");
+    if (saveBtn) {
+      const tenantId = String(saveBtn.dataset.saveTenant || "").trim();
+      const input = Array.from(tenantsList.querySelectorAll("[data-tenant-name-input]")).find(
+        (el) => String(el.dataset.tenantNameInput || "") === tenantId,
+      );
+      const nextName = String(input?.value || editingTenantName || "").trim();
+      void saveTenantName(tenantId, nextName);
+    }
+  });
+  tenantsList.addEventListener("input", (e) => {
+    const input = e.target.closest("[data-tenant-name-input]");
+    if (!input) return;
+    editingTenantName = String(input.value || "");
+  });
+  tenantsList.addEventListener("keydown", (e) => {
+    const input = e.target.closest("[data-tenant-name-input]");
+    if (!input) return;
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const tenantId = String(input.dataset.tenantNameInput || "").trim();
+      void saveTenantName(tenantId, input.value || "");
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      editingTenantId = "";
+      editingTenantName = "";
+      renderTenantsList();
+    }
+  });
+}
 if (uploadAvatarBtn && selfAvatarInput) {
   uploadAvatarBtn.addEventListener("click", () => selfAvatarInput.click());
   selfAvatarInput.addEventListener("change", async (e) => {
@@ -4320,9 +5255,6 @@ newBankMapCategory?.addEventListener("keydown", (e) => {
 });
 budgetAnalyzeBtn?.addEventListener("click", () => {
   void analyzeBudgetWithLLM();
-});
-budgetRefreshBtn?.addEventListener("click", () => {
-  void refreshBudgetWithMappings();
 });
 budgetClearFiltersBtn?.addEventListener("click", () => {
   selectedBudgetYears.clear();

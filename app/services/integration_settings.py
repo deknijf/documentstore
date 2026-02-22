@@ -3,7 +3,8 @@ from sqlalchemy.orm import Session
 import json
 
 from app.config import settings
-from app.models import BankCategoryMapping, IntegrationSettings
+from app.db import DEFAULT_TENANT_SLUG, get_default_tenant_id
+from app.models import BankCategoryMapping, IntegrationSettings, Tenant
 from app.services.security import decrypt_secret, encrypt_secret
 
 
@@ -66,14 +67,30 @@ def _normalize_bank_provider(value: str | None) -> str:
     return provider if provider in BANK_PROVIDERS else "vdk"
 
 
-def get_or_create_settings(db: Session) -> IntegrationSettings:
-    row = db.get(IntegrationSettings, 1)
+def _resolve_tenant_id(db: Session, tenant_id: str | None = None) -> str:
+    explicit = str(tenant_id or "").strip()
+    if explicit:
+        return explicit
+    tenant = db.query(Tenant).filter(Tenant.slug == DEFAULT_TENANT_SLUG).first()
+    if tenant:
+        return str(tenant.id)
+    return get_default_tenant_id()
+
+
+def get_or_create_settings(db: Session, tenant_id: str | None = None) -> IntegrationSettings:
+    resolved_tenant_id = _resolve_tenant_id(db, tenant_id)
+    row = (
+        db.query(IntegrationSettings)
+        .filter(IntegrationSettings.tenant_id == resolved_tenant_id)
+        .order_by(IntegrationSettings.id.asc())
+        .first()
+    )
     if row:
         _migrate_plaintext_secrets(row, db)
         return row
 
     row = IntegrationSettings(
-        id=1,
+        tenant_id=resolved_tenant_id,
         aws_region=settings.aws_region,
         aws_access_key_id=settings.aws_access_key_id,
         ai_provider=settings.ai_provider,
@@ -124,6 +141,12 @@ def get_or_create_settings(db: Session) -> IntegrationSettings:
         row.bnp_password_encrypted = encrypt_secret(settings.bnp_password)
     if settings.mail_imap_password:
         row.mail_imap_password_encrypted = encrypt_secret(settings.mail_imap_password)
+    if settings.smtp_password:
+        row.smtp_password_encrypted = encrypt_secret(settings.smtp_password)
+    row.smtp_server = settings.smtp_server
+    row.smtp_port = settings.smtp_port
+    row.smtp_username = settings.smtp_username
+    row.smtp_sender_email = settings.smtp_sender_email
 
     db.add(row)
     db.commit()
@@ -131,8 +154,8 @@ def get_or_create_settings(db: Session) -> IntegrationSettings:
     return row
 
 
-def get_runtime_settings(db: Session) -> dict[str, str | None]:
-    row = get_or_create_settings(db)
+def get_runtime_settings(db: Session, tenant_id: str | None = None) -> dict[str, str | None]:
+    row = get_or_create_settings(db, tenant_id=tenant_id)
 
     aws_secret = decrypt_secret(row.aws_secret_access_key_encrypted) or settings.aws_secret_access_key
     openrouter_key = decrypt_secret(row.openrouter_api_key_encrypted) or settings.openrouter_api_key
@@ -146,6 +169,7 @@ def get_runtime_settings(db: Session) -> dict[str, str | None]:
     bnp_api_key = decrypt_secret(row.bnp_api_key_encrypted) or settings.bnp_api_key
     bnp_password = decrypt_secret(row.bnp_password_encrypted) or settings.bnp_password
     mail_password = decrypt_secret(row.mail_imap_password_encrypted) or settings.mail_imap_password
+    smtp_password = decrypt_secret(row.smtp_password_encrypted) or settings.smtp_password
 
     ai_provider = str(row.ai_provider or settings.ai_provider or "openrouter").strip().lower()
     if ai_provider == "gemini":
@@ -191,6 +215,11 @@ def get_runtime_settings(db: Session) -> dict[str, str | None]:
         "mail_ingest_frequency_minutes": int(row.mail_ingest_frequency_minutes or settings.mail_ingest_frequency_minutes or 0),
         "mail_ingest_group_id": row.mail_ingest_group_id or settings.mail_ingest_group_id or "",
         "mail_ingest_attachment_types": row.mail_ingest_attachment_types or settings.mail_ingest_attachment_types or "pdf",
+        "smtp_server": row.smtp_server or settings.smtp_server or "",
+        "smtp_port": int(row.smtp_port or settings.smtp_port or 587),
+        "smtp_username": row.smtp_username or settings.smtp_username or "",
+        "smtp_password": smtp_password or "",
+        "smtp_sender_email": row.smtp_sender_email or settings.smtp_sender_email or "",
     }
 
     runtime["bank_base_url"] = runtime.get(f"{bank_provider}_base_url")
@@ -200,8 +229,9 @@ def get_runtime_settings(db: Session) -> dict[str, str | None]:
     return runtime
 
 
-def settings_to_out(db: Session) -> dict[str, str | bool]:
-    row = get_or_create_settings(db)
+def settings_to_out(db: Session, tenant_id: str | None = None) -> dict[str, str | bool]:
+    resolved_tenant_id = _resolve_tenant_id(db, tenant_id)
+    row = get_or_create_settings(db, tenant_id=resolved_tenant_id)
     ai_provider = str(row.ai_provider or settings.ai_provider or "openrouter").strip().lower()
     if ai_provider == "gemini":
         ai_provider = "google"
@@ -211,7 +241,7 @@ def settings_to_out(db: Session) -> dict[str, str | bool]:
     bank_csv_mappings: list[dict[str, str | bool]] = []
     table_rows = (
         db.query(BankCategoryMapping)
-        .filter(BankCategoryMapping.is_active.is_(True))
+        .filter(BankCategoryMapping.tenant_id == resolved_tenant_id, BankCategoryMapping.is_active.is_(True))
         .order_by(BankCategoryMapping.priority.asc(), BankCategoryMapping.created_at.asc())
         .all()
     )
@@ -244,6 +274,7 @@ def settings_to_out(db: Session) -> dict[str, str | bool]:
                     visible_in_budget = bool(item.get("visible_in_budget", True))
                     db.add(
                         BankCategoryMapping(
+                            tenant_id=resolved_tenant_id,
                             keyword=keyword,
                             flow=flow,
                             category=category,
@@ -300,6 +331,11 @@ def settings_to_out(db: Session) -> dict[str, str | bool]:
         "mail_ingest_frequency_minutes": int(row.mail_ingest_frequency_minutes or settings.mail_ingest_frequency_minutes or 0),
         "mail_ingest_group_id": row.mail_ingest_group_id or settings.mail_ingest_group_id or "",
         "mail_ingest_attachment_types": row.mail_ingest_attachment_types or settings.mail_ingest_attachment_types or "pdf",
+        "smtp_server": row.smtp_server or settings.smtp_server or "",
+        "smtp_port": int(row.smtp_port or settings.smtp_port or 587),
+        "smtp_username": row.smtp_username or settings.smtp_username or "",
+        "has_smtp_password": bool(row.smtp_password_encrypted) or bool(settings.smtp_password),
+        "smtp_sender_email": row.smtp_sender_email or settings.smtp_sender_email or "",
         "bank_csv_prompt": row.bank_csv_prompt or DEFAULT_BANK_CSV_PROMPT,
         "bank_csv_mappings": bank_csv_mappings,
         "has_openrouter_api_key": bool(row.openrouter_api_key_encrypted),
@@ -311,6 +347,7 @@ def settings_to_out(db: Session) -> dict[str, str | bool]:
 
 def update_settings(
     db: Session,
+    tenant_id: str | None = None,
     *,
     aws_region: str | None,
     aws_access_key_id: str | None,
@@ -348,11 +385,17 @@ def update_settings(
     mail_ingest_frequency_minutes: int | None,
     mail_ingest_group_id: str | None,
     mail_ingest_attachment_types: str | None,
+    smtp_server: str | None,
+    smtp_port: int | None,
+    smtp_username: str | None,
+    smtp_password: str | None,
+    smtp_sender_email: str | None,
     bank_csv_prompt: str | None,
     bank_csv_mappings: list[dict[str, str | bool]] | None,
     default_ocr_provider: str | None,
 ) -> dict[str, str | bool]:
-    row = get_or_create_settings(db)
+    resolved_tenant_id = _resolve_tenant_id(db, tenant_id)
+    row = get_or_create_settings(db, tenant_id=resolved_tenant_id)
 
     if aws_region is not None:
         row.aws_region = aws_region
@@ -448,6 +491,16 @@ def update_settings(
             )
         )
         row.mail_ingest_attachment_types = normalized_types or "pdf"
+    if smtp_server is not None:
+        row.smtp_server = str(smtp_server or "").strip() or None
+    if smtp_port is not None:
+        row.smtp_port = int(smtp_port) if int(smtp_port) > 0 else 587
+    if smtp_username is not None:
+        row.smtp_username = str(smtp_username or "").strip() or None
+    if smtp_password is not None and smtp_password.strip():
+        row.smtp_password_encrypted = encrypt_secret(smtp_password.strip())
+    if smtp_sender_email is not None:
+        row.smtp_sender_email = str(smtp_sender_email or "").strip() or None
     if bank_csv_prompt is not None:
         row.bank_csv_prompt = bank_csv_prompt
     if bank_csv_mappings is not None:
@@ -472,10 +525,11 @@ def update_settings(
                 }
             )
         row.bank_csv_mapping_json = json.dumps(cleaned, ensure_ascii=False)
-        db.query(BankCategoryMapping).delete()
+        db.query(BankCategoryMapping).filter(BankCategoryMapping.tenant_id == resolved_tenant_id).delete()
         for idx, item in enumerate(cleaned):
             db.add(
                 BankCategoryMapping(
+                    tenant_id=resolved_tenant_id,
                     keyword=item["keyword"],
                     flow=item["flow"],
                     category=item["category"],
@@ -491,4 +545,4 @@ def update_settings(
             row.default_ocr_provider = "llm_vision" if ocr_provider == "openrouter" else ocr_provider
 
     db.commit()
-    return settings_to_out(db)
+    return settings_to_out(db, tenant_id=resolved_tenant_id)

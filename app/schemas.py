@@ -23,6 +23,10 @@ class DocumentOut(BaseModel):
     paid: bool
     paid_on: str | None
     bank_paid_verified: bool
+    bank_match_score: int | None = None
+    bank_match_confidence: str | None = None
+    bank_match_reason: str | None = None
+    bank_match_external_transaction_id: str | None = None
     remark: str | None
     ocr_text: str | None
     ocr_processed: bool
@@ -41,11 +45,31 @@ class LoginIn(BaseModel):
     password: str
 
 
+class SignupIn(BaseModel):
+    name: str
+    email: str
+    password: str
+
+
+class ForgotPasswordIn(BaseModel):
+    email: str
+
+
+class ResetPasswordIn(BaseModel):
+    email: str
+    token: str
+    password: str
+    confirm_password: str
+
+
 class UserOut(BaseModel):
     id: str
+    tenant_id: str
+    tenant_name: str | None = None
     email: str
     name: str
     avatar_path: str | None = None
+    role: str = "gebruiker"
     is_bootstrap_admin: bool
     is_admin: bool = False
     group_ids: list[str] = Field(default_factory=list)
@@ -56,10 +80,62 @@ class AuthOut(BaseModel):
     user: UserOut
 
 
+class TenantOut(BaseModel):
+    id: str
+    name: str
+    slug: str
+    is_active: bool = False
+    users_count: int = 0
+    admins_count: int = 0
+    groups_count: int = 0
+    documents_count: int = 0
+    transactions_count: int = 0
+
+
+class CreateTenantIn(BaseModel):
+    name: str
+    slug: str | None = None
+
+
+class SwitchTenantIn(BaseModel):
+    tenant_id: str
+
+
+class UpdateTenantIn(BaseModel):
+    name: str
+
+
 class UpdateMeIn(BaseModel):
     email: str
     name: str
     password: str | None = None
+
+
+class SavedViewOut(BaseModel):
+    id: str
+    name: str
+    filters: dict
+    created_at: datetime
+    updated_at: datetime
+
+
+class CreateSavedViewIn(BaseModel):
+    name: str
+    filters: dict
+
+
+class AuditLogOut(BaseModel):
+    id: str
+    created_at: datetime
+    user_id: str | None = None
+    user_name: str | None = None
+    user_email: str | None = None
+    action: str
+    entity_type: str
+    entity_id: str | None = None
+    ip: str | None = None
+    user_agent: str | None = None
+    details: dict = Field(default_factory=dict)
 
 
 class GroupOut(BaseModel):
@@ -72,6 +148,7 @@ class CreateUserIn(BaseModel):
     email: str
     name: str
     password: str
+    role: str | None = None
     group_ids: list[str] = Field(default_factory=list)
 
 
@@ -79,6 +156,7 @@ class UpdateUserIn(BaseModel):
     email: str
     name: str
     password: str | None = None
+    role: str | None = None
     group_id: str | None = None
 
 
@@ -95,7 +173,7 @@ class LabelOut(BaseModel):
 
 class CreateLabelIn(BaseModel):
     name: str
-    group_id: str
+    group_id: str | None = None
 
 
 class SetDocumentLabelsIn(BaseModel):
@@ -190,6 +268,11 @@ class IntegrationSettingsOut(BaseModel):
     mail_ingest_frequency_minutes: int
     mail_ingest_group_id: str
     mail_ingest_attachment_types: str
+    smtp_server: str
+    smtp_port: int
+    smtp_username: str
+    has_smtp_password: bool
+    smtp_sender_email: str
     bank_csv_prompt: str
     bank_csv_mappings: list[dict[str, str | bool]] = Field(default_factory=list)
     default_ocr_provider: str
@@ -232,6 +315,11 @@ class UpdateIntegrationSettingsIn(BaseModel):
     mail_ingest_frequency_minutes: int | None = None
     mail_ingest_group_id: str | None = None
     mail_ingest_attachment_types: str | None = None
+    smtp_server: str | None = None
+    smtp_port: int | None = None
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    smtp_sender_email: str | None = None
     bank_csv_prompt: str | None = None
     bank_csv_mappings: list[dict[str, str | bool]] | None = None
     default_ocr_provider: str | None = None
@@ -258,6 +346,7 @@ class BankTransactionOut(BaseModel):
     id: str
     bank_account_id: str
     external_transaction_id: str
+    dedupe_hash: str | None = None
     csv_import_id: str | None = None
     csv_filename: str | None = None
     booking_date: str | None = None
@@ -267,6 +356,11 @@ class BankTransactionOut(BaseModel):
     counterparty_name: str | None = None
     remittance_information: str | None = None
     movement_type: str | None = None
+    category: str | None = None
+    source: str | None = None
+    auto_mapping: bool = False
+    llm_mapping: bool = False
+    manual_mapping: bool = False
     raw_json: str | None = None
     linked_document_id: str | None = None
     linked_document_title: str | None = None
@@ -310,6 +404,9 @@ class BudgetAnalyzedTransactionOut(BaseModel):
     flow: str
     category: str
     source: str
+    auto_mapping: bool = False
+    llm_mapping: bool = False
+    manual_mapping: bool = False
     reason: str | None = None
     linked_document_id: str | None = None
     linked_document_title: str | None = None

@@ -17,6 +17,16 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db import Base
 
 
+class Tenant(Base):
+    __tablename__ = "tenants"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    slug: Mapped[str] = mapped_column(String(80), unique=True, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
 user_groups = Table(
     "user_groups",
     Base.metadata,
@@ -36,12 +46,14 @@ document_labels = Table(
 class User(Base):
     __tablename__ = "users"
 
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id"), nullable=False, index=True)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     avatar_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     is_bootstrap_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_by_user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
     groups = relationship("Group", secondary=user_groups, back_populates="users")
@@ -50,6 +62,7 @@ class User(Base):
 class Group(Base):
     __tablename__ = "groups"
 
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id"), nullable=False, index=True)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
@@ -62,6 +75,7 @@ class Label(Base):
     __table_args__ = (UniqueConstraint("group_id", "name", name="uq_labels_group_name"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     group_id: Mapped[str] = mapped_column(String(36), ForeignKey("groups.id"), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
@@ -72,6 +86,7 @@ class Label(Base):
 class CategoryCatalog(Base):
     __tablename__ = "category_catalog"
 
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id"), nullable=False, index=True)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     name: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
     prompt_template: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -84,16 +99,77 @@ class CategoryCatalog(Base):
 class SessionToken(Base):
     __tablename__ = "session_tokens"
 
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id"), nullable=False, index=True)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     token: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+
+
+class SavedView(Base):
+    __tablename__ = "saved_views"
+    __table_args__ = (UniqueConstraint("tenant_id", "user_id", "name", name="uq_saved_views_tenant_user_name"),)
+
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id"), nullable=False, index=True)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    filters_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id"), nullable=False, index=True)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True, index=True)
+    action: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    entity_type: Mapped[str] = mapped_column(String(60), nullable=False, index=True)
+    entity_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    details_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
+class AsyncJob(Base):
+    __tablename__ = "async_jobs"
+
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id"), nullable=False, index=True)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    job_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued", index=True)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    processed: Mapped[int] = mapped_column(nullable=False, default=0)
+    total: Mapped[int] = mapped_column(nullable=False, default=0)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    result_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id"), nullable=False, index=True)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    token_hash: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 class IntegrationSettings(Base):
     __tablename__ = "integration_settings"
 
-    id: Mapped[int] = mapped_column(primary_key=True, default=1)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id"), nullable=False, index=True)
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
 
     aws_region: Mapped[str | None] = mapped_column(String(64), nullable=True)
     aws_access_key_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -136,6 +212,11 @@ class IntegrationSettings(Base):
     mail_ingest_frequency_minutes: Mapped[int | None] = mapped_column(nullable=True)
     mail_ingest_group_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("groups.id"), nullable=True)
     mail_ingest_attachment_types: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    smtp_server: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    smtp_port: Mapped[int | None] = mapped_column(nullable=True)
+    smtp_username: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    smtp_password_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    smtp_sender_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     default_ocr_provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
@@ -150,11 +231,13 @@ class IntegrationSettings(Base):
 class Document(Base):
     __tablename__ = "documents"
 
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id"), nullable=False, index=True)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     content_type: Mapped[str] = mapped_column(String(100), nullable=False)
     file_path: Mapped[str] = mapped_column(String(500), nullable=False)
     thumbnail_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    content_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
 
     group_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("groups.id"), nullable=True, index=True)
     uploaded_by_user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
@@ -174,6 +257,10 @@ class Document(Base):
     paid: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     paid_on: Mapped[str | None] = mapped_column(String(32), nullable=True)
     bank_paid_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    bank_match_score: Mapped[int | None] = mapped_column(nullable=True)
+    bank_match_confidence: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    bank_match_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    bank_match_external_transaction_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     remark: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     ocr_text: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -198,6 +285,7 @@ class Document(Base):
 class BankAccount(Base):
     __tablename__ = "bank_accounts"
 
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id"), nullable=False, index=True)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     provider: Mapped[str] = mapped_column(String(32), nullable=False, default="vdk")
@@ -211,16 +299,23 @@ class BankTransaction(Base):
     __tablename__ = "bank_transactions"
     __table_args__ = (UniqueConstraint("bank_account_id", "external_transaction_id", name="uq_bank_tx_account_external"),)
 
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id"), nullable=False, index=True)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     bank_account_id: Mapped[str] = mapped_column(String(36), ForeignKey("bank_accounts.id"), nullable=False, index=True)
     csv_import_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("bank_csv_imports.id"), nullable=True, index=True)
     external_transaction_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    dedupe_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     booking_date: Mapped[str | None] = mapped_column(String(32), nullable=True)
     value_date: Mapped[str | None] = mapped_column(String(32), nullable=True)
     amount: Mapped[float | None] = mapped_column(Float, nullable=True)
     currency: Mapped[str | None] = mapped_column(String(8), nullable=True)
     counterparty_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     remittance_information: Mapped[str | None] = mapped_column(Text, nullable=True)
+    category: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    source: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    auto_mapping: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    llm_mapping: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    manual_mapping: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     raw_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
@@ -228,6 +323,7 @@ class BankTransaction(Base):
 class BankCsvImport(Base):
     __tablename__ = "bank_csv_imports"
 
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id"), nullable=False, index=True)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     imported_count: Mapped[int] = mapped_column(nullable=False, default=0)
@@ -239,6 +335,7 @@ class BankCsvImport(Base):
 class BankCategoryMapping(Base):
     __tablename__ = "bank_category_mappings"
 
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id"), nullable=False, index=True)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     keyword: Mapped[str] = mapped_column(String(255), nullable=False)
     flow: Mapped[str] = mapped_column(String(16), nullable=False, default="all")
@@ -253,6 +350,7 @@ class BankCategoryMapping(Base):
 class BankBudgetAnalysisRun(Base):
     __tablename__ = "bank_budget_analysis_runs"
 
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id"), nullable=False, index=True)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     source_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
     provider: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -270,6 +368,7 @@ class BankBudgetAnalysisTx(Base):
     __tablename__ = "bank_budget_analysis_txs"
     __table_args__ = (UniqueConstraint("run_id", "external_transaction_id", name="uq_budget_run_external_tx"),)
 
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id"), nullable=False, index=True)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     run_id: Mapped[str] = mapped_column(String(36), ForeignKey("bank_budget_analysis_runs.id"), nullable=False, index=True)
     external_transaction_id: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -296,6 +395,7 @@ class MailIngestSeen(Base):
         ),
     )
 
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id"), nullable=False, index=True)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     mailbox_fingerprint: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     message_uid: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
