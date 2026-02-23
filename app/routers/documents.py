@@ -18,6 +18,8 @@ router.add_api_route("/api/documents/{document_id}", legacy_main.get_document, m
 router.add_api_route("/api/documents/{document_id}", legacy_main.update_document, methods=["PUT"])
 router.add_api_route("/api/documents/{document_id}/reprocess", legacy_main.reprocess_document, methods=["POST"])
 router.add_api_route("/api/documents/{document_id}/labels", legacy_main.set_document_labels, methods=["PUT"])
+router.add_api_route("/api/documents/{document_id}/duplicate/keep", legacy_main.keep_duplicate_document, methods=["POST"])
+router.add_api_route("/api/documents/{document_id}/duplicate/delete", legacy_main.delete_duplicate_document, methods=["POST"])
 
 # Direct file download
 router.add_api_route("/files/{document_id}", legacy_main.download_original, methods=["GET"])

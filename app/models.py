@@ -238,6 +238,14 @@ class Document(Base):
     file_path: Mapped[str] = mapped_column(String(500), nullable=False)
     thumbnail_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     content_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    ocr_text_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+
+    # Duplicate handling:
+    # - file_sha256: detected immediately on upload
+    # - ocr_text: detected after OCR extraction (100% match)
+    duplicate_of_document_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    duplicate_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    duplicate_resolved: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     group_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("groups.id"), nullable=True, index=True)
     uploaded_by_user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
@@ -329,6 +337,7 @@ class BankCsvImport(Base):
     imported_count: Mapped[int] = mapped_column(nullable=False, default=0)
     parsed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     parsed_source_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    file_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 

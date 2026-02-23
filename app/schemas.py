@@ -20,6 +20,9 @@ class DocumentOut(BaseModel):
     currency: str | None
     iban: str | None
     structured_reference: str | None
+    duplicate_of_document_id: str | None = None
+    duplicate_reason: str | None = None
+    duplicate_resolved: bool = True
     paid: bool
     paid_on: str | None
     bank_paid_verified: bool
@@ -369,6 +372,9 @@ class BankTransactionOut(BaseModel):
 
 class ImportTransactionsOut(BaseModel):
     imported: int
+    duplicate_file: bool = False
+    no_new_transactions: bool = False
+    existing_filename: str | None = None
 
 
 class BudgetQuickCategoryMapIn(BaseModel):

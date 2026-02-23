@@ -1,4 +1,5 @@
 import json
+import hashlib
 import re
 
 from sqlalchemy.orm import Session
@@ -15,6 +16,19 @@ from app.services.ocr.openai_provider import OpenAIOCRProvider
 from app.services.ocr.openrouter_provider import OpenRouterOCRProvider
 from app.services.ocr.textract_provider import TextractOCRProvider
 from app.services.thumbnail_service import ThumbnailService
+
+
+def _normalize_ocr_text_for_hash(text: str | None) -> str:
+    t = str(text or "").lower()
+    t = re.sub(r"\\s+", " ", t).strip()
+    return t
+
+
+def _ocr_text_hash(text: str | None) -> str | None:
+    norm = _normalize_ocr_text_for_hash(text)
+    if not norm:
+        return None
+    return hashlib.sha256(norm.encode("utf-8")).hexdigest()
 
 
 def _normalize_structured_reference(value: str | None) -> str | None:
@@ -112,6 +126,28 @@ def process_document(db: Session, document_id: str, ocr_provider_name: str | Non
 
         ocr_text = ocr_provider.extract_text(doc.file_path, doc.content_type)
         doc.ocr_processed = True
+        doc.ocr_text_hash = _ocr_text_hash(ocr_text)
+
+        # Duplicate detection after OCR (100% match): keep OCR, but skip costly AI parsing
+        # until the user decides whether to keep this as a separate version or delete.
+        skip_ai_due_to_duplicate = False
+        if doc.ocr_text_hash and not force:
+            existing = (
+                db.query(Document)
+                .filter(
+                    Document.tenant_id == doc.tenant_id,
+                    Document.deleted_at.is_(None),
+                    Document.id != doc.id,
+                    Document.ocr_text_hash == doc.ocr_text_hash,
+                )
+                .order_by(Document.created_at.desc())
+                .first()
+            )
+            if existing:
+                doc.duplicate_of_document_id = str(existing.id)
+                doc.duplicate_reason = "ocr_text"
+                doc.duplicate_resolved = False
+                skip_ai_due_to_duplicate = True
 
         metadata: dict = {}
         category_profiles: list[dict] = []
@@ -121,7 +157,7 @@ def process_document(db: Session, document_id: str, ocr_provider_name: str | Non
             or (ai_provider == "openai" and bool(runtime.get("openai_api_key")))
             or (ai_provider in {"google", "gemini"} and bool(runtime.get("google_api_key")))
         )
-        if ai_enabled:
+        if ai_enabled and not skip_ai_due_to_duplicate:
             categories = db.query(CategoryCatalog).filter(CategoryCatalog.tenant_id == doc.tenant_id).all()
             for c in categories:
                 fields: list[str] = []

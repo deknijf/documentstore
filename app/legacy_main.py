@@ -827,6 +827,9 @@ def document_to_out(doc: Document) -> dict:
         "currency": doc.currency,
         "iban": doc.iban,
         "structured_reference": doc.structured_reference,
+        "duplicate_of_document_id": getattr(doc, "duplicate_of_document_id", None),
+        "duplicate_reason": getattr(doc, "duplicate_reason", None),
+        "duplicate_resolved": bool(getattr(doc, "duplicate_resolved", True)),
         "paid": bool(doc.paid),
         "paid_on": doc.paid_on,
         "bank_paid_verified": bool(getattr(doc, "bank_paid_verified", False)),
@@ -3072,17 +3075,36 @@ async def import_bank_csv(
     content = await file.read()
     if not content:
         raise HTTPException(status_code=400, detail="Bestand is leeg")
+
+    file_sha256 = hashlib.sha256(content).hexdigest()
     account = _get_or_create_csv_import_account(db, tenant_id)
     _, txs = parse_imported_transactions(file.filename or "", content)
-    import_row = BankCsvImport(
-        tenant_id=tenant_id,
-        filename=file.filename or "import.csv",
-        imported_count=0,
+
+    # If the exact same file was already imported, ignore this upload completely.
+    existing_file = (
+        db.query(BankCsvImport)
+        .filter(BankCsvImport.tenant_id == tenant_id, BankCsvImport.file_sha256 == file_sha256)
+        .order_by(BankCsvImport.created_at.desc())
+        .first()
     )
-    db.add(import_row)
-    db.commit()
-    db.refresh(import_row)
-    imported = 0
+    if existing_file:
+        try:
+            audit_log(
+                db,
+                tenant_id=tenant_id,
+                user_id=str(current_user.id),
+                action="bank.csv.duplicate_file",
+                entity_type="bank_csv_import",
+                entity_id=str(existing_file.id),
+                details={"filename": str(existing_file.filename or ""), "file_sha256": file_sha256},
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+        return {"imported": 0, "duplicate_file": True, "existing_filename": str(existing_file.filename or "")}
+
+    # First pass: determine which transactions are new (no duplicates).
+    new_payloads: list[dict] = []
     for t in txs:
         ext_id = str(t.get("external_transaction_id") or "").strip()
         dedupe_hash = _tx_dedupe_hash_from_payload(t)
@@ -3096,44 +3118,67 @@ async def import_bank_csv(
             dedupe_hash=dedupe_hash,
         )
         if row:
-            row.external_transaction_id = ext_id or row.external_transaction_id
-            row.booking_date = t.get("booking_date")
-            row.value_date = t.get("value_date")
-            row.amount = t.get("amount")
-            row.currency = t.get("currency")
-            row.counterparty_name = t.get("counterparty_name")
-            row.remittance_information = t.get("remittance_information")
-            row.raw_json = t.get("raw_json")
-            row.csv_import_id = import_row.id
-            row.dedupe_hash = dedupe_hash
-            imported += 1
-        else:
-            db.add(
-                BankTransaction(
-                    tenant_id=tenant_id,
-                    bank_account_id=account.id,
-                    csv_import_id=import_row.id,
-                    external_transaction_id=ext_id or f"dedupe_{dedupe_hash[:16]}",
-                    dedupe_hash=dedupe_hash,
-                    booking_date=t.get("booking_date"),
-                    value_date=t.get("value_date"),
-                    amount=t.get("amount"),
-                    currency=t.get("currency"),
-                    counterparty_name=t.get("counterparty_name"),
-                    remittance_information=t.get("remittance_information"),
-                    category=None,
-                    source=None,
-                    auto_mapping=False,
-                    llm_mapping=False,
-                    manual_mapping=False,
-                    raw_json=t.get("raw_json"),
-                )
+            continue
+        new_payloads.append(t)
+
+    if not new_payloads:
+        try:
+            audit_log(
+                db,
+                tenant_id=tenant_id,
+                user_id=str(current_user.id),
+                action="bank.csv.no_new_transactions",
+                entity_type="bank_csv_import",
+                entity_id="",
+                details={"filename": str(file.filename or ""), "file_sha256": file_sha256},
             )
-            imported += 1
+            db.commit()
+        except Exception:
+            db.rollback()
+        return {"imported": 0, "no_new_transactions": True}
+
+    import_row = BankCsvImport(
+        tenant_id=tenant_id,
+        filename=file.filename or "import.csv",
+        imported_count=0,
+        file_sha256=file_sha256,
+    )
+    db.add(import_row)
+    db.commit()
+    db.refresh(import_row)
+
+    imported = 0
+    for t in new_payloads:
+        ext_id = str(t.get("external_transaction_id") or "").strip()
+        dedupe_hash = _tx_dedupe_hash_from_payload(t)
+        if not ext_id and not dedupe_hash:
+            continue
+        db.add(
+            BankTransaction(
+                tenant_id=tenant_id,
+                bank_account_id=account.id,
+                csv_import_id=import_row.id,
+                external_transaction_id=ext_id or f"dedupe_{dedupe_hash[:16]}",
+                dedupe_hash=dedupe_hash,
+                booking_date=t.get("booking_date"),
+                value_date=t.get("value_date"),
+                amount=t.get("amount"),
+                currency=t.get("currency"),
+                counterparty_name=t.get("counterparty_name"),
+                remittance_information=t.get("remittance_information"),
+                category=None,
+                source=None,
+                auto_mapping=False,
+                llm_mapping=False,
+                manual_mapping=False,
+                raw_json=t.get("raw_json"),
+            )
+        )
+        imported += 1
+
     import_row.imported_count = imported
-    if imported > 0:
-        import_row.parsed_at = datetime.utcnow()
-        import_row.parsed_source_hash = "csv-import"
+    import_row.parsed_at = datetime.utcnow()
+    import_row.parsed_source_hash = "csv-import"
     db.commit()
     try:
         audit_log(
@@ -3143,7 +3188,7 @@ async def import_bank_csv(
             action="bank.csv.upload",
             entity_type="bank_csv_import",
             entity_id=str(import_row.id),
-            details={"filename": str(import_row.filename or ""), "imported": imported},
+            details={"filename": str(import_row.filename or ""), "imported": imported, "file_sha256": file_sha256},
         )
         db.commit()
     except Exception:
@@ -4032,9 +4077,6 @@ async def upload_document(
         .order_by(Document.created_at.desc())
         .first()
     )
-    if duplicate:
-        return document_to_out(duplicate)
-
     file_path.write_bytes(data)
 
     doc = Document(
@@ -4046,6 +4088,9 @@ async def upload_document(
         group_id=auto_group_id,
         uploaded_by_user_id=current_user.id,
         content_sha256=content_sha256,
+        duplicate_of_document_id=str(duplicate.id) if duplicate else None,
+        duplicate_reason="file_sha256" if duplicate else None,
+        duplicate_resolved=False if duplicate else True,
         paid=False,
         ocr_processed=False,
         ai_processed=False,
@@ -4063,14 +4108,104 @@ async def upload_document(
             action="documents.upload",
             entity_type="document",
             entity_id=str(doc.id),
-            details={"filename": str(doc.filename or ""), "content_type": str(doc.content_type or "")},
+            details={
+                "filename": str(doc.filename or ""),
+                "content_type": str(doc.content_type or ""),
+                "duplicate_of_document_id": str(getattr(doc, "duplicate_of_document_id", "") or ""),
+                "duplicate_reason": str(getattr(doc, "duplicate_reason", "") or ""),
+            },
         )
         db.commit()
     except Exception:
         db.rollback()
 
-    background_tasks.add_task(process_document_job, document_id, None)
+    # For duplicates we first ask user whether to keep as separate version or delete.
+    if not duplicate:
+        background_tasks.add_task(process_document_job, document_id, None)
     return document_to_out(doc)
+
+
+@app.post("/api/documents/{document_id}/duplicate/keep", response_model=DocumentOut)
+async def keep_duplicate_document(
+    document_id: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user_dep),
+):
+    tenant_id = _tenant_id_for_user(current_user)
+    doc = (
+        db.query(Document)
+        .filter(Document.id == document_id, Document.tenant_id == tenant_id, Document.deleted_at.is_(None))
+        .first()
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document niet gevonden")
+
+    doc.duplicate_resolved = True
+    db.commit()
+    db.refresh(doc)
+
+    try:
+        audit_log(
+            db,
+            tenant_id=tenant_id,
+            user_id=str(current_user.id),
+            action="documents.duplicate.keep",
+            entity_type="document",
+            entity_id=str(doc.id),
+            details={
+                "duplicate_of_document_id": str(getattr(doc, "duplicate_of_document_id", "") or ""),
+                "duplicate_reason": str(getattr(doc, "duplicate_reason", "") or ""),
+            },
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+
+    # Start parsing only if it was not processed yet.
+    if doc.status == "uploaded" and not bool(getattr(doc, "ocr_processed", False)):
+        background_tasks.add_task(process_document_job, str(doc.id), None)
+    return document_to_out(doc)
+
+
+@app.post("/api/documents/{document_id}/duplicate/delete")
+async def delete_duplicate_document(
+    document_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user_dep),
+):
+    from app.db import upsert_search_index
+
+    tenant_id = _tenant_id_for_user(current_user)
+    doc = (
+        db.query(Document)
+        .filter(Document.id == document_id, Document.tenant_id == tenant_id, Document.deleted_at.is_(None))
+        .first()
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document niet gevonden")
+
+    doc.deleted_at = datetime.utcnow()
+    db.commit()
+    upsert_search_index(str(doc.id), "")
+
+    try:
+        audit_log(
+            db,
+            tenant_id=tenant_id,
+            user_id=str(current_user.id),
+            action="documents.duplicate.delete",
+            entity_type="document",
+            entity_id=str(doc.id),
+            details={
+                "duplicate_of_document_id": str(getattr(doc, "duplicate_of_document_id", "") or ""),
+                "duplicate_reason": str(getattr(doc, "duplicate_reason", "") or ""),
+            },
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+    return {"ok": True}
 
 
 @app.get("/api/documents", response_model=list[DocumentOut])

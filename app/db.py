@@ -91,6 +91,15 @@ def _ensure_document_columns() -> None:
             conn.execute(text("UPDATE documents SET bank_paid_verified = 0 WHERE bank_paid_verified IS NULL"))
         if not _column_exists(conn, "documents", "content_sha256"):
             conn.execute(text("ALTER TABLE documents ADD COLUMN content_sha256 VARCHAR(64)"))
+        if not _column_exists(conn, "documents", "ocr_text_hash"):
+            conn.execute(text("ALTER TABLE documents ADD COLUMN ocr_text_hash VARCHAR(64)"))
+        if not _column_exists(conn, "documents", "duplicate_of_document_id"):
+            conn.execute(text("ALTER TABLE documents ADD COLUMN duplicate_of_document_id VARCHAR(36)"))
+        if not _column_exists(conn, "documents", "duplicate_reason"):
+            conn.execute(text("ALTER TABLE documents ADD COLUMN duplicate_reason VARCHAR(32)"))
+        if not _column_exists(conn, "documents", "duplicate_resolved"):
+            conn.execute(text("ALTER TABLE documents ADD COLUMN duplicate_resolved BOOLEAN DEFAULT 1"))
+            conn.execute(text("UPDATE documents SET duplicate_resolved = 1 WHERE duplicate_resolved IS NULL"))
         if not _column_exists(conn, "documents", "bank_match_score"):
             conn.execute(text("ALTER TABLE documents ADD COLUMN bank_match_score INTEGER"))
         if not _column_exists(conn, "documents", "bank_match_confidence"):
@@ -139,6 +148,12 @@ def _ensure_document_columns() -> None:
             conn.execute(text("ALTER TABLE documents ADD COLUMN line_items TEXT"))
         if not _column_exists(conn, "documents", "extra_fields_json"):
             conn.execute(text("ALTER TABLE documents ADD COLUMN extra_fields_json TEXT"))
+
+        # Indexes for dedupe detection
+        if _column_exists(conn, "documents", "ocr_text_hash"):
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_documents_ocr_text_hash ON documents(ocr_text_hash)"))
+        if _column_exists(conn, "documents", "duplicate_of_document_id"):
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_documents_duplicate_of ON documents(duplicate_of_document_id)"))
 
 
 def _ensure_user_columns() -> None:
@@ -558,6 +573,10 @@ def _ensure_bank_columns() -> None:
             conn.execute(text("ALTER TABLE bank_csv_imports ADD COLUMN parsed_at DATETIME"))
         if not _column_exists(conn, "bank_csv_imports", "parsed_source_hash"):
             conn.execute(text("ALTER TABLE bank_csv_imports ADD COLUMN parsed_source_hash VARCHAR(64)"))
+        if not _column_exists(conn, "bank_csv_imports", "file_sha256"):
+            conn.execute(text("ALTER TABLE bank_csv_imports ADD COLUMN file_sha256 VARCHAR(64)"))
+        if _column_exists(conn, "bank_csv_imports", "file_sha256"):
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_bank_csv_imports_file_sha256 ON bank_csv_imports(file_sha256)"))
         if not _column_exists(conn, "bank_category_mappings", "visible_in_budget"):
             conn.execute(text("ALTER TABLE bank_category_mappings ADD COLUMN visible_in_budget BOOLEAN DEFAULT 1"))
             conn.execute(
@@ -586,6 +605,40 @@ def _ensure_bank_columns() -> None:
                 )
             )
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_bank_transactions_dedupe_hash ON bank_transactions(dedupe_hash)"))
+        # Ensure dedupe_hash is truly unique per account to prevent duplicate transactions.
+        # Keep the most recent row (highest rowid) when duplicates exist.
+        try:
+            conn.execute(
+                text(
+                    """
+                    DELETE FROM bank_transactions
+                    WHERE dedupe_hash IS NOT NULL
+                      AND TRIM(dedupe_hash) != ''
+                      AND rowid NOT IN (
+                        SELECT MAX(rowid)
+                        FROM bank_transactions
+                        WHERE dedupe_hash IS NOT NULL AND TRIM(dedupe_hash) != ''
+                        GROUP BY bank_account_id, dedupe_hash
+                      )
+                    """
+                )
+            )
+        except Exception:
+            # Best-effort cleanup: if anything fails, continue without hard-failing init.
+            pass
+        try:
+            conn.execute(
+                text(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS uq_bank_tx_account_dedupe
+                    ON bank_transactions(bank_account_id, dedupe_hash)
+                    WHERE dedupe_hash IS NOT NULL AND TRIM(dedupe_hash) != ''
+                    """
+                )
+            )
+        except Exception:
+            # If duplicates still exist, do not break startup; application-level checks still apply.
+            pass
         conn.execute(
             text(
                 """

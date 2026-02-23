@@ -31,6 +31,7 @@ const userInfo = document.getElementById("userInfo");
 const refreshBtn = document.getElementById("refreshBtn");
 const pageTitle = document.getElementById("pageTitle");
 const topbarEl = document.querySelector(".topbar");
+const docDuplicateBanner = document.getElementById("docDuplicateBanner");
 const detailOverdueAlert = document.getElementById("detailOverdueAlert");
 const checkBankBtn = document.getElementById("checkBankBtn");
 const adminMenuWrap = document.getElementById("adminMenuWrap");
@@ -313,6 +314,7 @@ let bankCsvMappings = [];
 let bankCsvMappingGroups = [];
 let budgetAnalyzedTransactions = [];
 let budgetAnalysisMeta = null;
+// Duplicate banner shows all unresolved duplicates and persists until user decides.
 let budgetAnalyzeProgressTimer = null;
 let analyzeJobPollTimer = null;
 let checkBankJobPollTimer = null;
@@ -554,6 +556,97 @@ function showToast(message) {
   toastTimer = setTimeout(() => {
     toastMsg.classList.add("hidden");
   }, 2000);
+}
+
+function hideDocDuplicateBanner() {
+  if (!docDuplicateBanner) return;
+  docDuplicateBanner.classList.add("hidden");
+  docDuplicateBanner.innerHTML = "";
+}
+
+function getUnresolvedDuplicates(docsList) {
+  return (docsList || []).filter(
+    (d) => d && d.duplicate_of_document_id && d.duplicate_resolved === false && !d.deleted_at
+  );
+}
+
+function resolveDocLabelFromLoadedDocs(docId) {
+  const d = (allDocs || []).find((x) => String(x.id || "") === String(docId || ""));
+  if (!d) return "";
+  return d.subject || d.filename || "";
+}
+
+async function renderDocDuplicateBanners() {
+  if (!docDuplicateBanner) return;
+  const unresolved = getUnresolvedDuplicates(allDocs);
+  if (!unresolved.length) {
+    hideDocDuplicateBanner();
+    return;
+  }
+
+  const itemsHtml = unresolved
+    .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())
+    .map((d) => {
+      const existingId = String(d.duplicate_of_document_id || "");
+      const existingLabel = resolveDocLabelFromLoadedDocs(existingId) || existingId;
+      const shortMsg = "Nieuwe versie bewaren?";
+      return `
+        <div class="duplicate-banner-item" data-dup-new="${escapeHtml(String(d.id || ""))}" data-dup-existing="${escapeHtml(existingId)}">
+          <div class="dup-text">
+            <span>Duplicaat:</span>
+            <button class="dup-link" type="button" title="${escapeHtml(existingLabel)}" data-dup-open="${escapeHtml(existingId)}">${escapeHtml(existingLabel)}</button>
+            <span>${shortMsg}</span>
+          </div>
+          <div class="dup-actions">
+            <button class="dup-keep" type="button" data-dup-keep="1">Houden</button>
+            <button class="dup-delete" type="button" data-dup-delete="1">Verwijderen</button>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+
+  docDuplicateBanner.innerHTML = itemsHtml;
+  docDuplicateBanner.classList.remove("hidden");
+
+  // Event delegation
+  docDuplicateBanner.onclick = async (ev) => {
+    const t = ev.target;
+    if (!t) return;
+    const openId = t.getAttribute && t.getAttribute("data-dup-open");
+    if (openId) {
+      ev.preventDefault();
+      openDetails(openId, { syncRoute: true });
+      return;
+    }
+    const item = t.closest && t.closest(".duplicate-banner-item");
+    if (!item) return;
+    const newId = item.getAttribute("data-dup-new");
+    if (!newId) return;
+
+    if (t.getAttribute && t.getAttribute("data-dup-keep")) {
+      const res = await authFetch(`/api/documents/${encodeURIComponent(newId)}/duplicate/keep`, { method: "POST" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        return alert(err.detail || "Kon duplicaat niet bewaren");
+      }
+      await loadDocs();
+      showToast("Duplicaat bewaard.");
+      return;
+    }
+
+    if (t.getAttribute && t.getAttribute("data-dup-delete")) {
+      const ok = window.confirm("Dit nieuwe duplicaat verwijderen?");
+      if (!ok) return;
+      const res = await authFetch(`/api/documents/${encodeURIComponent(newId)}/duplicate/delete`, { method: "POST" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        return alert(err.detail || "Kon duplicaat niet verwijderen");
+      }
+      await loadDocs();
+      showToast("Duplicaat verwijderd.");
+    }
+  };
 }
 
 function isKasticketCategory(name) {
@@ -2959,7 +3052,10 @@ function renderBudgetAnalysis() {
                           <span class="budget-instantie-value" title="${escapeHtml(instantieFull)}">${escapeHtml(instantieShort)}</span>
                         </div>
                         <div class="budget-detail-cell">
-                          <span class="budget-category-pill">${escapeHtml(txCategory)}${sourceBadge}</span>
+                          <span class="budget-category-pill" title="${escapeHtml(txCategory)}">
+                            <span class="budget-category-pill-text">${escapeHtml(txCategory)}</span>
+                            ${sourceBadge}
+                          </span>
                         </div>
                         <div class="budget-detail-cell">${docBadge}</div>
                         <div class="budget-detail-cell right">
@@ -3230,7 +3326,15 @@ async function importBankTransactions() {
   if (currentTabId() === "bank-budget") {
     await loadBudgetAnalysis();
   }
-  showToast(`wijzigingen opgeslaan (${Number(data.imported || 0)} transacties)`);
+  if (data.duplicate_file) {
+    showToast("Deze CSV bestaat al. Alle transacties bestaan al.");
+    return;
+  }
+  if (data.no_new_transactions) {
+    showToast("Alle transacties uit deze CSV bestaan al.");
+    return;
+  }
+  showToast(`wijzigingen opgeslaan (${Number(data.imported || 0)} nieuwe transacties)`);
 }
 
 async function deleteBankAccount(accountId) {
@@ -3249,6 +3353,7 @@ async function deleteBankAccount(accountId) {
 async function loadDocs() {
   const res = await authFetch("/api/documents");
   allDocs = res.ok ? await res.json() : [];
+  await renderDocDuplicateBanners();
   await applyGlobalSearch();
 }
 
@@ -3759,6 +3864,7 @@ async function uploadFile(file) {
     const err = await res.json().catch(() => ({}));
     return alert(err.detail || "Upload mislukt");
   }
+  await res.json().catch(() => ({}));
   await loadDocs();
 }
 
@@ -3789,6 +3895,7 @@ async function openDetails(docId, { syncRoute = true, replaceRoute = false } = {
   dRemark.value = activeDoc.remark || "";
   applyDetailCategoryFields(activeDoc.category || "");
   renderDetailOverdueAlert();
+  await renderDocDuplicateBanners();
 
   const docLabels = labels.filter((l) => l.group_id === activeDoc.group_id);
   dLabels.innerHTML = docLabels.map((l) => `<option value="${l.id}">${escapeHtml(l.name)}</option>`).join("");
