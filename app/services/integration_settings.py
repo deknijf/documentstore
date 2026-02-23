@@ -220,6 +220,8 @@ def get_runtime_settings(db: Session, tenant_id: str | None = None) -> dict[str,
         "smtp_username": row.smtp_username or settings.smtp_username or "",
         "smtp_password": smtp_password or "",
         "smtp_sender_email": row.smtp_sender_email or settings.smtp_sender_email or "",
+        # Used for document/budget categorization via LLM.
+        "bank_csv_prompt": row.bank_csv_prompt or DEFAULT_BANK_CSV_PROMPT,
     }
 
     runtime["bank_base_url"] = runtime.get(f"{bank_provider}_base_url")

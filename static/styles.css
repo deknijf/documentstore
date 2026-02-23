@@ -1277,6 +1277,32 @@ button:disabled {
   color: #1f2f4f;
 }
 
+.doc-bank-label {
+  margin: 0 0 8px;
+}
+
+.detail-label-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.25rem 0 0.65rem;
+}
+
+.doc-bank-category-pill {
+  font-size: 0.76rem;
+  padding: 2px 8px;
+  min-height: 22px;
+  border-radius: 999px;
+}
+
+.doc-bank-category-pill .budget-category-ai,
+.doc-bank-category-pill .budget-category-map,
+.doc-bank-category-pill .budget-category-manual {
+  height: 16px;
+  min-width: 16px;
+  font-size: 0.6rem;
+}
+
 .doc-meta-list {
   margin: 0;
   padding: 0;
@@ -2741,7 +2767,7 @@ dialog {
   }
   .facet-layout { grid-template-columns: repeat(2, minmax(160px, 1fr)); }
   .facet-full { grid-column: span 2; }
-  .facet-half { grid-column: span 2; }
+  .facet-half { grid-column: span 1; }
   .facet-quarter { grid-column: span 1; }
   .radio-row { grid-template-columns: repeat(2, minmax(100px, 1fr)); }
   #categoryDocs.compact-cards {

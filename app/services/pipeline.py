@@ -3,13 +3,13 @@ import hashlib
 import re
 
 from sqlalchemy.orm import Session
-
-from app.config import settings
 from sqlalchemy import func
 
+from app.config import settings
 from app.db import upsert_search_index
-from app.models import CategoryCatalog, Document
+from app.models import BankCategoryMapping, Document, CategoryCatalog, Group, Label
 from app.services.ai_extractor import get_ai_extractor
+from app.services.bank_budget_ai import _call_llm
 from app.services.integration_settings import get_runtime_settings
 from app.services.ocr.google_provider import GoogleOCRProvider
 from app.services.ocr.openai_provider import OpenAIOCRProvider
@@ -95,6 +95,243 @@ def _get_ocr_provider(provider_name: str, runtime: dict):
         access_key=runtime.get("aws_access_key_id"),
         secret_key=runtime.get("aws_secret_access_key"),
     )
+
+
+def _ensure_tenant_default_group_id(db: Session, *, tenant_id: str) -> str | None:
+    """
+    Labels require a group_id (legacy). When group access control is disabled, we still
+    keep a stable per-tenant group to attach labels/documents to.
+    """
+    if not tenant_id:
+        return None
+    g = (
+        db.query(Group)
+        .filter(Group.tenant_id == tenant_id)
+        .filter(func.lower(Group.name).like("gebruikers%"))
+        .order_by(Group.created_at.asc())
+        .first()
+    )
+    if not g:
+        g = (
+            db.query(Group)
+            .filter(Group.tenant_id == tenant_id)
+            .filter(func.lower(Group.name).like("users%"))
+            .order_by(Group.created_at.asc())
+            .first()
+        )
+    return str(getattr(g, "id", "") or "").strip() or None
+
+
+def _ensure_doc_has_label(db: Session, *, doc: Document, label_name: str) -> None:
+    name = str(label_name or "").strip()
+    if not name:
+        return
+    group_id = str(getattr(doc, "group_id", "") or "").strip() or _ensure_tenant_default_group_id(db, tenant_id=str(doc.tenant_id or ""))
+    if not group_id:
+        return
+    label = (
+        db.query(Label)
+        .filter(Label.tenant_id == doc.tenant_id, Label.group_id == group_id, func.lower(Label.name) == name.lower())
+        .first()
+    )
+    if not label:
+        label = Label(tenant_id=doc.tenant_id, name=name, group_id=group_id)
+        db.add(label)
+        db.flush()
+    if label not in (doc.labels or []):
+        doc.labels.append(label)
+
+
+def _apply_bank_mapping_labels(db: Session, *, doc: Document, ocr_text: str) -> None:
+    """
+    Best-effort label assignment based on Bank Settings keyword mappings.
+    This is intentionally cheap (no LLM): only keyword matching.
+    """
+    tenant_id = str(doc.tenant_id or "").strip()
+    if not tenant_id:
+        return
+
+    # Always attach bank paid category (if already determined elsewhere).
+    paid_cat = str(getattr(doc, "bank_paid_category", "") or "").strip()
+    if paid_cat:
+        _ensure_doc_has_label(db, doc=doc, label_name=paid_cat)
+
+    issuer_subject = "\n".join(
+        x
+        for x in [
+            str(doc.issuer or ""),
+            str(doc.subject or ""),
+            str(doc.filename or ""),
+        ]
+        if x
+    ).lower()
+    ocr_lower = str(ocr_text or "").lower()
+    if not (issuer_subject.strip() or ocr_lower.strip()):
+        return
+
+    rows = (
+        db.query(BankCategoryMapping)
+        .filter(BankCategoryMapping.tenant_id == tenant_id)
+        .filter(BankCategoryMapping.is_active.is_(True))
+        .order_by(BankCategoryMapping.priority.desc(), func.length(BankCategoryMapping.keyword).desc())
+        .all()
+    )
+    # Prefer matches on issuer/subject over incidental OCR matches.
+    strong_match: tuple[str, int, int] | None = None  # (category, priority, kwlen)
+    weak_match: tuple[str, int, int] | None = None
+    for r in rows:
+        kw = str(getattr(r, "keyword", "") or "").strip()
+        if not kw:
+            continue
+        kwl = kw.lower()
+        cat = str(getattr(r, "category", "") or "").strip()
+        if not cat:
+            continue
+        if kwl and kwl in issuer_subject:
+            cand = (cat, int(getattr(r, "priority", 0) or 0), len(kw))
+            # Among strong matches prefer longest keyword, then highest priority.
+            if (strong_match is None) or (cand[2] > strong_match[2]) or (cand[2] == strong_match[2] and cand[1] > strong_match[1]):
+                strong_match = cand
+            continue
+        if kwl and kwl in ocr_lower:
+            cand = (cat, int(getattr(r, "priority", 0) or 0), len(kw))
+            if (weak_match is None) or (cand[2] > weak_match[2]) or (cand[2] == weak_match[2] and cand[1] > weak_match[1]):
+                weak_match = cand
+
+    # If we found an explicit mapping (MAP), it may overwrite MAN/AI (requested behavior).
+    picked = strong_match or weak_match
+    if picked:
+        matched_category = picked[0]
+        doc.budget_category = matched_category
+        doc.budget_category_source = "mapping"
+        # Single-label system: mapping defines the primary label.
+        try:
+            # Ensure label exists and then replace doc.labels with only this label.
+            group_id = str(getattr(doc, "group_id", "") or "").strip() or _ensure_tenant_default_group_id(db, tenant_id=tenant_id)
+            label = (
+                db.query(Label)
+                .filter(Label.tenant_id == doc.tenant_id, Label.group_id == group_id, func.lower(Label.name) == matched_category.lower())
+                .first()
+            )
+            if not label:
+                label = Label(tenant_id=doc.tenant_id, name=matched_category.strip(), group_id=group_id)
+                db.add(label)
+                db.flush()
+            doc.labels = [label]
+        except Exception:
+            _ensure_doc_has_label(db, doc=doc, label_name=matched_category)
+        return
+
+    # If no mapping hit: keep existing manual/mapping label, otherwise infer with LLM (AI pill).
+    existing_source = str(getattr(doc, "budget_category_source", "") or "").strip().lower()
+    existing_category = str(getattr(doc, "budget_category", "") or "").strip()
+    if existing_category and existing_source in {"manual", "mapping", "llm"}:
+        return
+
+    runtime = get_runtime_settings(db, tenant_id=tenant_id)
+    ai_provider = str(runtime.get("ai_provider") or settings.ai_provider or "openrouter").strip().lower()
+    ai_enabled = (
+        (ai_provider == "openrouter" and bool(runtime.get("openrouter_api_key")))
+        or (ai_provider == "openai" and bool(runtime.get("openai_api_key")))
+        or (ai_provider in {"google", "gemini"} and bool(runtime.get("google_api_key")))
+    )
+    if not ai_enabled:
+        return
+
+    prompt_template = str(runtime.get("bank_csv_prompt") or "").strip()
+    if not prompt_template:
+        return
+
+    known_categories = (
+        db.query(BankCategoryMapping.category)
+        .filter(BankCategoryMapping.tenant_id == tenant_id, BankCategoryMapping.is_active.is_(True))
+        .distinct()
+        .all()
+    )
+    known = sorted({str(x[0]).strip() for x in known_categories if x and x[0] and str(x[0]).strip()})
+    if not known:
+        return
+
+    # Keep payload compact to reduce token usage.
+    ocr_snip = (ocr_text or "").strip()
+    if len(ocr_snip) > 1600:
+        ocr_snip = ocr_snip[:1600]
+
+    # Ask LLM to pick a category. It MUST choose from known categories.
+    prompt = f"""
+{prompt_template}
+
+Je krijgt nu 1 document (geen transactie). Kies de BESTE budget-categorie voor dit document op basis van afzender/instantie en context.
+Gebruik de bestaande categorieen maximaal en kies EXACT 1 categorie uit deze lijst:
+{", ".join(known)}
+
+Document info:
+- filename: {str(doc.filename or "")[:180]}
+- category: {str(doc.category or "")[:80]}
+- issuer: {str(doc.issuer or "")[:160]}
+- subject: {str(doc.subject or "")[:240]}
+- document_date: {str(doc.document_date or "")[:32]}
+- due_date: {str(doc.due_date or "")[:32]}
+- amount: {str(doc.total_amount or "")} {str(doc.currency or "")}
+- iban: {str(doc.iban or "")[:64]}
+- structured_reference: {str(doc.structured_reference or "")[:64]}
+
+OCR snippet:
+{ocr_snip}
+
+Geef ENKEL geldige JSON terug met exact dit schema:
+{{"category":"string","reason":"korte motivatie"}}
+
+Regels:
+- category moet exact overeenkomen met een item uit de lijst.
+- Als je het niet zeker weet, kies de best passende categorie uit de lijst (geen nieuwe categorie).
+"""
+    try:
+        out = _call_llm(runtime, prompt, max_retries=3)
+        cat = str((out or {}).get("category") or "").strip()
+        if cat and cat in known:
+            doc.budget_category = cat
+            doc.budget_category_source = "llm"
+            try:
+                group_id = str(getattr(doc, "group_id", "") or "").strip() or _ensure_tenant_default_group_id(db, tenant_id=tenant_id)
+                label = (
+                    db.query(Label)
+                    .filter(Label.tenant_id == doc.tenant_id, Label.group_id == group_id, func.lower(Label.name) == cat.lower())
+                    .first()
+                )
+                if not label:
+                    label = Label(tenant_id=doc.tenant_id, name=cat.strip(), group_id=group_id)
+                    db.add(label)
+                    db.flush()
+                doc.labels = [label]
+            except Exception:
+                _ensure_doc_has_label(db, doc=doc, label_name=cat)
+            return
+    except Exception:
+        # Don't fail document processing for optional labeling.
+        pass
+
+    # Hard guarantee: every document gets a budget label (MAP or AI).
+    # If LLM fails, fall back to a safe bucket and still mark it as AI (llm)
+    # to keep UI consistent with the requested MAN/MAP/AI system.
+    fallback = "Overige uitgaven"
+    doc.budget_category = fallback
+    doc.budget_category_source = "llm"
+    try:
+        group_id = str(getattr(doc, "group_id", "") or "").strip() or _ensure_tenant_default_group_id(db, tenant_id=tenant_id)
+        label = (
+            db.query(Label)
+            .filter(Label.tenant_id == doc.tenant_id, Label.group_id == group_id, func.lower(Label.name) == fallback.lower())
+            .first()
+        )
+        if not label:
+            label = Label(tenant_id=doc.tenant_id, name=fallback.strip(), group_id=group_id)
+            db.add(label)
+            db.flush()
+        doc.labels = [label]
+    except Exception:
+        _ensure_doc_has_label(db, doc=doc, label_name=fallback)
+    return
 
 
 def process_document(db: Session, document_id: str, ocr_provider_name: str | None = None, force: bool = False) -> None:
@@ -358,6 +595,9 @@ def process_document(db: Session, document_id: str, ocr_provider_name: str | Non
                     )
             except Exception:
                 extra_summary = ""
+
+        # Attach labels based on current OCR text + mapping rules (cheap, no LLM).
+        _apply_bank_mapping_labels(db, doc=doc, ocr_text=ocr_text)
 
         label_text = " ".join([label.name for label in doc.labels])
         searchable = "\n".join(

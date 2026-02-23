@@ -30,6 +30,10 @@ class DocumentOut(BaseModel):
     bank_match_confidence: str | None = None
     bank_match_reason: str | None = None
     bank_match_external_transaction_id: str | None = None
+    bank_paid_category: str | None = None
+    bank_paid_category_source: str | None = None
+    budget_category: str | None = None
+    budget_category_source: str | None = None
     remark: str | None
     ocr_text: str | None
     ocr_processed: bool

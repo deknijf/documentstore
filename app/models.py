@@ -269,6 +269,11 @@ class Document(Base):
     bank_match_confidence: Mapped[str | None] = mapped_column(String(16), nullable=True)
     bank_match_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     bank_match_external_transaction_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    bank_paid_category: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    bank_paid_category_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Budget label for this document (MAN/MAP/AI). Kept separate from tags to track provenance.
+    budget_category: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    budget_category_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
     remark: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     ocr_text: Mapped[str | None] = mapped_column(Text, nullable=True)

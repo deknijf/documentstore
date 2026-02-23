@@ -648,7 +648,13 @@ def _ensure_tenant_user_group(db: Session, tenant_id: str) -> Group:
     existing = (
         db.query(Group)
         .filter(Group.tenant_id == tenant_id)
-        .filter(func.lower(Group.name).in_(["gebruikers", "users"]))
+        .filter(
+            or_(
+                func.lower(Group.name).in_(["gebruikers", "users"]),
+                func.lower(Group.name).like("gebruikers%"),
+                func.lower(Group.name).like("users%"),
+            )
+        )
         .order_by(Group.created_at.asc())
         .first()
     )
@@ -837,6 +843,10 @@ def document_to_out(doc: Document) -> dict:
         "bank_match_confidence": getattr(doc, "bank_match_confidence", None),
         "bank_match_reason": getattr(doc, "bank_match_reason", None),
         "bank_match_external_transaction_id": getattr(doc, "bank_match_external_transaction_id", None),
+        "bank_paid_category": getattr(doc, "bank_paid_category", None),
+        "bank_paid_category_source": getattr(doc, "bank_paid_category_source", None),
+        "budget_category": getattr(doc, "budget_category", None),
+        "budget_category_source": getattr(doc, "budget_category_source", None),
         "remark": doc.remark,
         "line_items": doc.line_items,
         "extra_fields": extra_fields,
@@ -904,6 +914,139 @@ def bank_csv_import_to_out(row: BankCsvImport, meta: dict | None = None) -> dict
         "parsed_source_hash": row.parsed_source_hash,
         "created_at": row.created_at,
     }
+
+
+def _ensure_bank_category_labels(db: Session, tenant_id: str) -> None:
+    """
+    Synchronize bank mapping categories into document labels (tenant-wide).
+    Labels are used in the UI as badges on paid documents, and as searchable facets.
+    """
+    # Keep labels in a single tenant group when GROUPS_ENABLED is off.
+    grp = _ensure_tenant_user_group(db, tenant_id)
+    if not grp.id:
+        db.flush()
+    group_id = grp.id
+
+    cats = [
+        c[0]
+        for c in db.query(BankCategoryMapping.category)
+        .filter(BankCategoryMapping.tenant_id == tenant_id, BankCategoryMapping.is_active == True)  # noqa: E712
+        .distinct()
+        .all()
+        if c and c[0]
+    ]
+    cats = [str(x).strip() for x in cats if str(x or "").strip()]
+    if not cats:
+        return
+
+    existing = {
+        (str(l.name or "").strip().lower()): l
+        for l in db.query(Label).filter(Label.tenant_id == tenant_id, Label.group_id == group_id).all()
+    }
+    created = 0
+    for cat in sorted(set(cats), key=lambda x: x.lower()):
+        if cat.lower() in existing:
+            continue
+        db.add(Label(tenant_id=tenant_id, name=cat, group_id=group_id))
+        created += 1
+    if created:
+        db.commit()
+
+
+def _ensure_doc_has_label(db: Session, doc: Document, label_name: str) -> None:
+    if not label_name:
+        return
+    label_name = str(label_name or "").strip()
+    if not label_name:
+        return
+    grp = _ensure_tenant_user_group(db, doc.tenant_id)
+    if not grp.id:
+        db.flush()
+    group_id = grp.id
+    label = (
+        db.query(Label)
+        .filter(
+            Label.tenant_id == doc.tenant_id,
+            Label.group_id == group_id,
+            func.lower(func.trim(Label.name)) == label_name.lower(),
+        )
+        .first()
+    )
+    if not label:
+        label = Label(tenant_id=doc.tenant_id, name=label_name.strip(), group_id=group_id)
+        db.add(label)
+        db.commit()
+        db.refresh(label)
+    if label not in (doc.labels or []):
+        doc.labels.append(label)
+
+
+def _ensure_doc_single_label(db: Session, doc: Document) -> bool:
+    """
+    Docstore currently treats labels as a single primary label per document (budget category).
+    This helper enforces that invariant by keeping only the primary label:
+    - Prefer doc.budget_category, then doc.bank_paid_category, otherwise keep first existing label.
+    Returns True if a change was applied.
+    """
+    target = str(getattr(doc, "budget_category", "") or "").strip() or str(getattr(doc, "bank_paid_category", "") or "").strip()
+    existing = list(doc.labels or [])
+    if not target and not existing:
+        return False
+    if not target and existing:
+        target = str(existing[0].name or "").strip()
+    if not target:
+        return False
+
+    # Ensure label exists and set it as the only label.
+    grp = _ensure_tenant_user_group(db, doc.tenant_id)
+    if not grp.id:
+        db.flush()
+    group_id = grp.id
+    label = (
+        db.query(Label)
+        .filter(
+            Label.tenant_id == doc.tenant_id,
+            Label.group_id == group_id,
+            func.lower(func.trim(Label.name)) == target.lower(),
+        )
+        .first()
+    )
+    if not label:
+        label = Label(tenant_id=doc.tenant_id, name=target.strip(), group_id=group_id)
+        db.add(label)
+        db.commit()
+        db.refresh(label)
+
+    target_label_id = str(label.id)
+    try:
+        # ORM sometimes doesn't remove association rows reliably for older DBs; do it explicitly.
+        db.execute(
+            text(
+                """
+                DELETE FROM document_labels
+                WHERE document_id = :doc_id AND label_id != :label_id
+                """
+            ),
+            {"doc_id": str(doc.id), "label_id": target_label_id},
+        )
+        db.execute(
+            text(
+                """
+                INSERT OR IGNORE INTO document_labels(document_id, label_id)
+                VALUES (:doc_id, :label_id)
+                """
+            ),
+            {"doc_id": str(doc.id), "label_id": target_label_id},
+        )
+        # Ensure the ORM doesn't try to delete already-deleted association rows.
+        db.expire(doc, ["labels"])
+        return True
+    except Exception:
+        # Fallback to ORM relationship assignment only (may fail on older DBs).
+        if len(existing) != 1 or (existing and str(existing[0].id) != target_label_id):
+            doc.labels = [label]
+            return True
+    return False
 
 
 def _extract_csv_import_meta(raw_json: str | None) -> dict[str, str]:
@@ -2457,7 +2600,12 @@ def delete_category(
 @app.get("/api/labels", response_model=list[LabelOut])
 def list_labels(db: Session = Depends(get_db), current_user: User = Depends(get_current_user_dep)):
     tenant_id = _tenant_id_for_user(current_user)
-    if _current_user_can_see_all_groups(current_user):
+    # Keep bank categories available as labels, so documents can be tagged consistently.
+    try:
+        _ensure_bank_category_labels(db, tenant_id)
+    except Exception:
+        db.rollback()
+    if not GROUPS_ENABLED or _current_user_can_see_all_groups(current_user):
         labels = db.query(Label).filter(Label.tenant_id == tenant_id).order_by(Label.name.asc()).all()
         return [{"id": l.id, "name": l.name, "group_id": l.group_id} for l in labels]
     group_ids = user_group_ids(current_user)
@@ -2483,15 +2631,18 @@ def create_label(
             db.flush()
         group_id = grp.id
 
+    name = str(payload.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Label naam is verplicht")
+
     existing = db.query(Label).filter(
         Label.tenant_id == tenant_id,
-        Label.group_id == group_id,
-        func.lower(Label.name) == payload.name.lower(),
+        func.lower(func.trim(Label.name)) == name.lower(),
     ).first()
     if existing:
-        raise HTTPException(status_code=400, detail="Label bestaat al in deze groep")
+        raise HTTPException(status_code=400, detail="Label bestaat al")
 
-    label = Label(tenant_id=tenant_id, name=payload.name.strip(), group_id=group_id)
+    label = Label(tenant_id=tenant_id, name=name, group_id=group_id)
     db.add(label)
     db.commit()
     db.refresh(label)
@@ -2509,9 +2660,22 @@ def set_document_labels(
 
     labels = []
     if payload.label_ids:
-        labels = db.query(Label).filter(Label.id.in_(payload.label_ids), Label.tenant_id == doc.tenant_id).all()
+        chosen_ids = [str(x) for x in payload.label_ids if str(x).strip()][:1]
+        if chosen_ids:
+            labels = db.query(Label).filter(Label.id.in_(chosen_ids), Label.tenant_id == doc.tenant_id).all()
 
-    doc.labels = labels
+    if labels:
+        doc.labels = labels
+        chosen = str(labels[0].name or "").strip()
+        if chosen:
+            doc.budget_category = chosen
+            doc.budget_category_source = "manual"
+        _ensure_doc_single_label(db, doc)
+    else:
+        db.execute(text("DELETE FROM document_labels WHERE document_id = :doc_id"), {"doc_id": str(doc.id)})
+        doc.labels = []
+        doc.budget_category = None
+        doc.budget_category_source = None
     db.commit()
     db.refresh(doc)
 
@@ -4058,6 +4222,12 @@ async def upload_document(
 
     member_group_ids = user_group_ids(current_user) if GROUPS_ENABLED else []
     auto_group_id = sorted(member_group_ids)[0] if member_group_ids else None
+    if not GROUPS_ENABLED:
+        # Keep a stable group_id for labels/tenancy even when group access control is disabled.
+        grp = _ensure_tenant_user_group(db, tenant_id)
+        if not grp.id:
+            db.flush()
+        auto_group_id = grp.id
 
     ext = Path(file.filename or "document").suffix or ".bin"
     document_id = str(uuid.uuid4())
@@ -4216,16 +4386,104 @@ def list_documents(
     current_user: User = Depends(get_current_user_dep),
 ):
     tenant_id = _tenant_id_for_user(current_user)
-    can_see_all = _current_user_can_see_all_groups(current_user)
-    group_ids = user_group_ids(current_user)
-    if not can_see_all and not group_ids:
-        return []
+    # Groups are currently disabled for access control: all users within a tenant can see all documents.
+    can_see_all = True if not GROUPS_ENABLED else _current_user_can_see_all_groups(current_user)
+    group_ids = user_group_ids(current_user) if GROUPS_ENABLED else []
     _purge_expired_deleted_docs(db, tenant_id)
 
     q = db.query(Document).filter(Document.tenant_id == tenant_id, Document.deleted_at.is_(None))
     if not can_see_all:
         q = q.filter(Document.group_id.in_(group_ids))
     docs = q.order_by(Document.created_at.desc()).offset(offset).limit(limit).all()
+
+    # Sync bank mapping categories into labels and attach labels on already verified paid documents.
+    try:
+        _ensure_bank_category_labels(db, tenant_id)
+    except Exception:
+        db.rollback()
+
+    # Backfill bank category fields from linked transaction when needed (bulk query).
+    ext_ids = [
+        str(d.bank_match_external_transaction_id or "").strip()
+        for d in docs
+        if getattr(d, "bank_paid_verified", False) and (not (getattr(d, "bank_paid_category", None))) and str(getattr(d, "bank_match_external_transaction_id", "") or "").strip()
+    ]
+    if ext_ids:
+        tx_rows = (
+            db.query(BankTransaction.external_transaction_id, BankTransaction.category, BankTransaction.source)
+            .filter(BankTransaction.tenant_id == tenant_id, BankTransaction.external_transaction_id.in_(ext_ids))
+            .all()
+        )
+        tx_map = {str(eid): {"category": cat, "source": src} for eid, cat, src in tx_rows if eid}
+        changed = False
+        for d in docs:
+            if not getattr(d, "bank_paid_verified", False):
+                continue
+            if getattr(d, "bank_paid_category", None):
+                continue
+            eid = str(getattr(d, "bank_match_external_transaction_id", "") or "").strip()
+            if not eid:
+                continue
+            hit = tx_map.get(eid)
+            if not hit:
+                continue
+            d.bank_paid_category = str(hit.get("category") or "").strip() or None
+            d.bank_paid_category_source = str(hit.get("source") or "").strip().lower() or None
+            if d.bank_paid_category:
+                _ensure_doc_has_label(db, d, d.bank_paid_category)
+                # If this is an explicit mapping, it may overwrite MAN/AI on documents.
+                if str(d.bank_paid_category_source or "").strip().lower() == "mapping":
+                    d.budget_category = d.bank_paid_category
+                    d.budget_category_source = "mapping"
+            changed = True
+        if changed:
+            db.commit()
+            for d in docs:
+                d = db.get(Document, d.id) or d
+
+    # Ensure label is attached for paid docs even when bank_paid_category was already stored.
+    try:
+        changed = False
+        for d in docs:
+            if not getattr(d, "bank_paid_verified", False):
+                continue
+            cat = str(getattr(d, "bank_paid_category", "") or "").strip()
+            if not cat:
+                continue
+            if not any(str(l.name or "").strip().lower() == cat.lower() for l in (d.labels or [])):
+                _ensure_doc_has_label(db, d, cat)
+                changed = True
+        if changed:
+            db.commit()
+    except Exception:
+        db.rollback()
+
+    # Backfill document budget labels (MAP/AI) for older docs that were processed before this feature existed.
+    try:
+        from app.services.pipeline import _apply_bank_mapping_labels as _apply_doc_budget_labels
+
+        changed = False
+        for d in docs:
+            if d.deleted_at is not None:
+                continue
+            if str(getattr(d, "status", "") or "") != "ready":
+                continue
+            if str(getattr(d, "budget_category", "") or "").strip():
+                continue
+            ocr_text = str(getattr(d, "ocr_text", "") or "").strip()
+            if not ocr_text:
+                continue
+            _apply_doc_budget_labels(db, doc=d, ocr_text=ocr_text)
+            if str(getattr(d, "budget_category", "") or "").strip():
+                changed = True
+            # Enforce single label invariant.
+            if _ensure_doc_single_label(db, d):
+                changed = True
+        if changed:
+            db.commit()
+    except Exception:
+        db.rollback()
+
     return [document_to_out(d) for d in docs]
 
 
@@ -4336,6 +4594,19 @@ def _check_documents_against_bank_csv_core(
         doc.bank_match_reason = str(best_reason or "")
         doc.bank_match_external_transaction_id = str(best_tx.external_transaction_id or "")
         doc.paid_on = str(best_tx.booking_date or doc.paid_on or now)
+        doc.bank_paid_category = str(best_tx.category or "").strip() or None
+        doc.bank_paid_category_source = str(best_tx.source or "").strip().lower() or None
+        if doc.bank_paid_category:
+            # Synchronize mapping categories into labels and attach label to this document.
+            try:
+                _ensure_bank_category_labels(db, tenant_id)
+                _ensure_doc_has_label(db, doc, doc.bank_paid_category)
+                # Explicit mapping from bank settings may overwrite MAN/AI on documents.
+                if str(doc.bank_paid_category_source or "").strip().lower() == "mapping":
+                    doc.budget_category = doc.bank_paid_category
+                    doc.budget_category_source = "mapping"
+            except Exception:
+                db.rollback()
         bank_remark = _build_bank_check_remark(best_tx, confidence=best_confidence, reason=best_reason)
         current_remark = str(doc.remark or "").strip()
         if bank_remark not in current_remark:
@@ -4547,6 +4818,12 @@ def get_document(
     current_user: User = Depends(get_current_user_dep),
 ):
     doc = ensure_doc_access(db.get(Document, document_id), current_user)
+    try:
+        if _ensure_doc_single_label(db, doc):
+            db.commit()
+            db.refresh(doc)
+    except Exception:
+        db.rollback()
     return document_to_out(doc)
 
 
@@ -4641,8 +4918,25 @@ def update_document(
     if payload.label_ids is not None:
         labels = []
         if payload.label_ids:
-            labels = db.query(Label).filter(Label.id.in_(payload.label_ids), Label.group_id == doc.group_id).all()
-        doc.labels = labels
+            chosen_ids = [str(x) for x in payload.label_ids if str(x).strip()][:1]
+            if chosen_ids:
+                if GROUPS_ENABLED:
+                    labels = db.query(Label).filter(Label.id.in_(chosen_ids), Label.group_id == doc.group_id).all()
+                else:
+                    labels = db.query(Label).filter(Label.id.in_(chosen_ids), Label.tenant_id == doc.tenant_id).all()
+        if labels:
+            chosen = str(labels[0].name or "").strip()
+            if chosen:
+                doc.budget_category = chosen
+                doc.budget_category_source = "manual"
+            # Enforce single label association row
+            _ensure_doc_single_label(db, doc)
+        else:
+            # Clear labels + budget_category when user clears selection
+            db.execute(text("DELETE FROM document_labels WHERE document_id = :doc_id"), {"doc_id": str(doc.id)})
+            doc.labels = []
+            doc.budget_category = None
+            doc.budget_category_source = None
 
     doc.searchable_text = _build_searchable_text(doc)
     db.commit()

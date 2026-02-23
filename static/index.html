@@ -164,31 +164,20 @@
 	        <div id="detailOverdueAlert" class="detail-overdue-alert hidden"></div>
 
         <section id="tab-dashboard" class="tab-panel active">
-          <div class="panel">
-            <div class="facet-head">
-              <h3>Faceted Search</h3>
-              <div class="facet-head-actions">
-                <button id="facetToggleBtn" class="ghost facet-toggle-btn" type="button" aria-label="Filters uitklappen" title="Filters uitklappen">▾</button>
-                <button id="clearFacetsBtn" class="ghost btn-action" type="button">Filters wissen</button>
-              </div>
-            </div>
-            <div id="facetLayout" class="facet-layout hidden">
-              <section class="facet-section facet-full">
-                <h4>Status</h4>
-                <div id="facetStatus" class="radio-row">
-                  <label><input type="radio" name="fStatusRadio" value="" checked /> Alle</label>
-                  <label><input type="radio" name="fStatusRadio" value="uploaded" /> Uploaded</label>
-                  <label><input type="radio" name="fStatusRadio" value="processing" /> Processing</label>
-                  <label><input type="radio" name="fStatusRadio" value="ready" /> Ready</label>
-                  <label><input type="radio" name="fStatusRadio" value="failed" /> Failed</label>
-                </div>
-              </section>
-
-              <section class="facet-section facet-half">
-                <h4>Bedrag</h4>
-                <div class="range-row">
-                  <input id="fMinAmountRange" type="range" min="0" max="10000" step="10" value="0" />
-                  <input id="fMaxAmountRange" type="range" min="0" max="10000" step="10" value="10000" />
+	          <div class="panel">
+	            <div class="facet-head">
+	              <h3>Faceted Search</h3>
+	              <div class="facet-head-actions">
+	                <button id="facetToggleBtn" class="ghost facet-toggle-btn" type="button" aria-label="Filters uitklappen" title="Filters uitklappen">▾</button>
+	                <button id="clearFacetsBtn" class="ghost btn-action" type="button">Filters wissen</button>
+	              </div>
+	            </div>
+	            <div id="facetLayout" class="facet-layout hidden">
+	              <section class="facet-section facet-half">
+	                <h4>Bedrag</h4>
+	                <div class="range-row">
+	                  <input id="fMinAmountRange" type="range" min="0" max="10000" step="10" value="0" />
+	                  <input id="fMaxAmountRange" type="range" min="0" max="10000" step="10" value="10000" />
                 </div>
                 <div class="range-values">
                   <input id="fMinAmount" type="number" step="0.01" placeholder="Min bedrag" />
@@ -202,48 +191,57 @@
                 <div class="range-values">
                   <input id="fDocDateFrom" type="date" />
                   <span>tot</span>
-                  <input id="fDocDateTo" type="date" />
-                </div>
-              </section>
+	                  <input id="fDocDateTo" type="date" />
+	                </div>
+	              </section>
 
-              <section class="facet-section facet-half">
-                <h4>Due Date</h4>
-                <div class="range-values">
-                  <input id="fDueDateFrom" type="date" />
-                  <span>tot</span>
-                  <input id="fDueDateTo" type="date" />
-                </div>
-              </section>
+	              <section class="facet-section facet-half">
+	                <h4>Due Date</h4>
+	                <div class="range-values">
+	                  <input id="fDueDateFrom" type="date" />
+	                  <span>tot</span>
+	                  <input id="fDueDateTo" type="date" />
+	                </div>
+	              </section>
 
-              <section class="facet-section facet-quarter">
-                <h4>Categorie</h4>
-                <div id="facetCategories" class="check-grid"></div>
-              </section>
+	              <section class="facet-section facet-half">
+	                <h4>Paid date</h4>
+	                <div class="range-values">
+	                  <input id="fPaidDateFrom" type="date" />
+	                  <span>tot</span>
+	                  <input id="fPaidDateTo" type="date" />
+	                </div>
+	              </section>
 
-              <section class="facet-section facet-quarter">
-                <h4>Afzender</h4>
-                <div id="facetIssuers" class="check-grid"></div>
-              </section>
+	              <section class="facet-section facet-quarter">
+	                <h4>Labels</h4>
+	                <div id="facetLabels" class="check-grid"></div>
+	              </section>
 
-              <section class="facet-section facet-quarter">
-                <h4>Labels</h4>
-                <div id="facetLabels" class="check-grid"></div>
-              </section>
+	              <section class="facet-section facet-quarter">
+	                <h4>Betaald</h4>
+	                <div id="facetPaid" class="radio-col">
+	                  <label><input type="radio" name="fPaidRadio" value="" checked /> Alle</label>
+	                  <label><input type="radio" name="fPaidRadio" value="paid" /> Betaald</label>
+	                  <label><input type="radio" name="fPaidRadio" value="unpaid" /> Onbetaald</label>
+	                </div>
+	              </section>
 
-              <section class="facet-section facet-quarter">
-                <h4>Betaald</h4>
-                <div id="facetPaid" class="radio-col">
-                  <label><input type="radio" name="fPaidRadio" value="" checked /> Alle</label>
-                  <label><input type="radio" name="fPaidRadio" value="paid" /> Betaald</label>
-                  <label><input type="radio" name="fPaidRadio" value="unpaid" /> Onbetaald</label>
-                </div>
-              </section>
+	              <section class="facet-section facet-quarter">
+	                <h4>Categorie</h4>
+	                <div id="facetCategories" class="check-grid"></div>
+	              </section>
 
-              <section class="facet-section facet-full">
-                <h4>Saved view</h4>
-                <div class="saved-view-row">
-                  <input id="savedViewName" class="input" type="text" placeholder="Naam (bv. Openstaande facturen)" />
-                  <button id="saveViewBtn" class="btn-action" type="button">Opslaan</button>
+	              <section class="facet-section facet-quarter">
+	                <h4>Afzender</h4>
+	                <div id="facetIssuers" class="check-grid"></div>
+	              </section>
+
+	              <section class="facet-section facet-full">
+	                <h4>Saved view</h4>
+	                <div class="saved-view-row">
+	                  <input id="savedViewName" class="input" type="text" placeholder="Naam (bv. Openstaande facturen)" />
+	                  <button id="saveViewBtn" class="btn-action" type="button">Opslaan</button>
                 </div>
                 <small class="muted">Sla de huidige filters op als een view.</small>
               </section>
@@ -297,6 +295,7 @@
                 <h3 id="detailTitle">Document details</h3>
                 <button id="detailBackBtn" class="ghost btn-action" type="button">Terug</button>
               </div>
+              <div id="detailLabelPills" class="detail-label-pills"></div>
               <div class="grid detail-fields">
                 <div class="form-field">
                   <label for="dSubject">Titel / onderwerp</label>
@@ -340,8 +339,8 @@
                   <div id="dynamicDetailFields" class="dynamic-fields"></div>
                 </div>
                 <div class="form-field">
-                  <label for="dLabels">Labels</label>
-                  <select id="dLabels" multiple></select>
+                  <label for="dLabels">Label</label>
+                  <select id="dLabels"></select>
                 </div>
                 <div class="form-field">
                   <label><input id="dPaid" type="checkbox" /> Betaald</label>

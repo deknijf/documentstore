@@ -57,7 +57,6 @@ const searchSuggest = document.getElementById("searchSuggest");
 const tenantSwitchWrap = document.getElementById("tenantSwitchWrap");
 const tenantSwitchSelect = document.getElementById("tenantSwitchSelect");
 const tenantFixedBadge = document.getElementById("tenantFixedBadge");
-const facetStatus = document.getElementById("facetStatus");
 const facetPaid = document.getElementById("facetPaid");
 const facetCategories = document.getElementById("facetCategories");
 const facetIssuers = document.getElementById("facetIssuers");
@@ -66,6 +65,8 @@ const fDocDateFrom = document.getElementById("fDocDateFrom");
 const fDocDateTo = document.getElementById("fDocDateTo");
 const fDueDateFrom = document.getElementById("fDueDateFrom");
 const fDueDateTo = document.getElementById("fDueDateTo");
+const fPaidDateFrom = document.getElementById("fPaidDateFrom");
+const fPaidDateTo = document.getElementById("fPaidDateTo");
 const fMinAmount = document.getElementById("fMinAmount");
 const fMaxAmount = document.getElementById("fMaxAmount");
 const fMinAmountRange = document.getElementById("fMinAmountRange");
@@ -321,6 +322,7 @@ let checkBankJobPollTimer = null;
 let savedViews = [];
 let auditLogs = [];
 const GROUPS_ENABLED = false;
+const detailLabelPills = document.getElementById("detailLabelPills");
 let selectedBudgetCategory = "";
 let selectedBudgetCategoryLabel = "";
 let budgetDetailSortColumn = "date";
@@ -780,11 +782,6 @@ function selectedValues(select) {
   return Array.from(select.selectedOptions).map((x) => x.value);
 }
 
-function currentStatusFilter() {
-  const el = facetStatus.querySelector("input[name='fStatusRadio']:checked");
-  return el ? el.value : "";
-}
-
 function currentPaidFilter() {
   const el = facetPaid.querySelector("input[name='fPaidRadio']:checked");
   return el ? el.value : "";
@@ -1100,13 +1097,11 @@ function renderAudit() {
 }
 
 function currentFacetFilters() {
-  const status = currentStatusFilter();
   const paid = currentPaidFilter();
   const categories = Array.from(facetSelections.categories || []);
   const issuers = Array.from(facetSelections.issuers || []);
   const label_ids = Array.from(facetSelections.labels || []);
   const filters = {};
-  if (status) filters.status = status;
   if (paid) filters.paid = paid;
   if (categories.length) filters.categories = categories;
   if (issuers.length) filters.issuers = issuers;
@@ -1115,6 +1110,8 @@ function currentFacetFilters() {
   if (fDocDateTo?.value) filters.document_date_to = fDocDateTo.value;
   if (fDueDateFrom?.value) filters.due_date_from = fDueDateFrom.value;
   if (fDueDateTo?.value) filters.due_date_to = fDueDateTo.value;
+  if (fPaidDateFrom?.value) filters.paid_date_from = fPaidDateFrom.value;
+  if (fPaidDateTo?.value) filters.paid_date_to = fPaidDateTo.value;
   if (fMinAmount?.value && Number.isFinite(Number(fMinAmount.value))) filters.min_amount = Number(fMinAmount.value);
   if (fMaxAmount?.value && Number.isFinite(Number(fMaxAmount.value))) filters.max_amount = Number(fMaxAmount.value);
   return filters;
@@ -1132,7 +1129,6 @@ function applyFacetFilters(filters) {
     if (el) el.checked = true;
   };
 
-  setRadioValue(facetStatus, "fStatusRadio", f.status || "");
   setRadioValue(facetPaid, "fPaidRadio", f.paid || "");
 
   (Array.isArray(f.categories) ? f.categories : []).forEach((x) => facetSelections.categories.add(String(x)));
@@ -1143,6 +1139,8 @@ function applyFacetFilters(filters) {
   if (fDocDateTo) fDocDateTo.value = String(f.document_date_to || "");
   if (fDueDateFrom) fDueDateFrom.value = String(f.due_date_from || "");
   if (fDueDateTo) fDueDateTo.value = String(f.due_date_to || "");
+  if (fPaidDateFrom) fPaidDateFrom.value = String(f.paid_date_from || "");
+  if (fPaidDateTo) fPaidDateTo.value = String(f.paid_date_to || "");
 
   if (fMinAmount) fMinAmount.value = f.min_amount != null && Number.isFinite(Number(f.min_amount)) ? String(f.min_amount) : "";
   if (fMaxAmount) fMaxAmount.value = f.max_amount != null && Number.isFinite(Number(f.max_amount)) ? String(f.max_amount) : "";
@@ -1574,7 +1572,6 @@ function matchesFilters(doc) {
     .join(" ")
     .toLowerCase();
 
-  const status = currentStatusFilter();
   const selectedCategories = facetSelections.categories;
   const selectedIssuers = facetSelections.issuers;
   const selectedLabels = facetSelections.labels;
@@ -1583,7 +1580,6 @@ function matchesFilters(doc) {
   if (search && !searchable.includes(search)) return false;
   if (selectedCategories.size && !selectedCategories.has(doc.category || "")) return false;
   if (selectedIssuers.size && !selectedIssuers.has(doc.issuer || "")) return false;
-  if (status && doc.status !== status) return false;
   if (paidFilter === "paid" && !doc.paid) return false;
   if (paidFilter === "unpaid" && doc.paid) return false;
   if (selectedLabels.size && !(doc.label_ids || []).some((id) => selectedLabels.has(id))) return false;
@@ -1591,6 +1587,14 @@ function matchesFilters(doc) {
   if (fDocDateTo.value && (doc.document_date || "") > fDocDateTo.value) return false;
   if (fDueDateFrom.value && (doc.due_date || "") < fDueDateFrom.value) return false;
   if (fDueDateTo.value && (doc.due_date || "") > fDueDateTo.value) return false;
+  if (fPaidDateFrom?.value) {
+    if (!doc.paid_on) return false;
+    if (String(doc.paid_on) < fPaidDateFrom.value) return false;
+  }
+  if (fPaidDateTo?.value) {
+    if (!doc.paid_on) return false;
+    if (String(doc.paid_on) > fPaidDateTo.value) return false;
+  }
 
   const min = Number(fMinAmount.value || "");
   const max = Number(fMaxAmount.value || "");
@@ -1755,6 +1759,25 @@ function cardTemplate(doc, opts = {}) {
   if (doc.status === "ready" && doc.ocr_processed) parseChips.push('<span class="doc-chip ok">OCR</span>');
   if (doc.status === "ready" && doc.ai_processed) parseChips.push('<span class="doc-chip soft">AI</span>');
   if (doc.bank_paid_verified) parseChips.push('<span class="doc-chip paid">PAID</span>');
+  const budgetLabel = String(doc.budget_category || doc.bank_paid_category || "").trim();
+  const budgetLabelSource = String(doc.budget_category_source || doc.bank_paid_category_source || "").trim().toLowerCase();
+  const budgetSourceBadge =
+    budgetLabelSource === "llm"
+      ? `<span class="budget-category-ai" title="AI mapping">AI</span>`
+      : budgetLabelSource === "mapping"
+        ? `<span class="budget-category-map" title="Expliciete mapping">MAP</span>`
+        : budgetLabelSource === "manual"
+          ? `<span class="budget-category-manual" title="Manuele mapping">MAN</span>`
+          : "";
+  const budgetLabelPill = budgetLabel
+    ? `<div class="doc-bank-label">
+        <span class="budget-category-pill doc-bank-category-pill" title="${escapeHtml(budgetLabel)}">
+          <span class="budget-category-pill-text">${escapeHtml(budgetLabel)}</span>
+          ${budgetSourceBadge}
+        </span>
+      </div>`
+    : "";
+
   const overdueChip = doc.due_date && !doc.paid && overdueDaysFromDueDate(doc.due_date) > 0
     ? `<div class="doc-overdue-badge">
         <span class="doc-overdue-line1">moest betaald zijn</span>
@@ -1776,14 +1799,15 @@ function cardTemplate(doc, opts = {}) {
       ${parseChips.length ? `<div class="doc-badges">${parseChips.join("")}</div>` : ""}
       ${overdueChip}
     </div>
-    <div class="doc-body">
-      <h4>${escapeHtml(title)}</h4>
-      <p>${escapeHtml(subtitle)}</p>
-      <ul class="doc-meta-list">
-        ${metaRows.map((r) => `<li><span>${r.icon}</span><span>${escapeHtml(r.value)}</span></li>`).join("")}
-        ${deletedRow}
-      </ul>
-    </div>
+	    <div class="doc-body">
+	      <h4>${escapeHtml(title)}</h4>
+	      <p>${escapeHtml(subtitle)}</p>
+	      ${budgetLabelPill}
+	      <ul class="doc-meta-list">
+	        ${metaRows.map((r) => `<li><span>${r.icon}</span><span>${escapeHtml(r.value)}</span></li>`).join("")}
+	        ${deletedRow}
+	      </ul>
+	    </div>
     ${showActions ? `<div class="doc-actions">
       <button class="doc-act" data-action="details" data-id="${doc.id}" title="Details">📄</button>
       <button class="doc-act" data-action="open" data-id="${doc.id}" title="Openen">👁</button>
@@ -3879,6 +3903,24 @@ async function openDetails(docId, { syncRoute = true, replaceRoute = false } = {
 
   suppressAutoSave = true;
   detailTitle.textContent = activeDoc.subject || activeDoc.filename;
+  if (detailLabelPills) {
+    const budgetLabel = String(activeDoc.budget_category || activeDoc.bank_paid_category || "").trim();
+    const budgetLabelSource = String(activeDoc.budget_category_source || activeDoc.bank_paid_category_source || "").trim().toLowerCase();
+    const budgetSourceBadge =
+      budgetLabelSource === "llm"
+        ? `<span class="budget-category-ai" title="AI mapping">AI</span>`
+        : budgetLabelSource === "mapping"
+          ? `<span class="budget-category-map" title="Expliciete mapping">MAP</span>`
+          : budgetLabelSource === "manual"
+            ? `<span class="budget-category-manual" title="Manuele mapping">MAN</span>`
+            : "";
+    detailLabelPills.innerHTML = budgetLabel
+      ? `<span class="budget-category-pill doc-bank-category-pill" title="${escapeHtml(budgetLabel)}">
+          <span class="budget-category-pill-text">${escapeHtml(budgetLabel)}</span>
+          ${budgetSourceBadge}
+        </span>`
+      : "";
+  }
   dSubject.value = activeDoc.subject || "";
   dIssuer.value = activeDoc.issuer || "";
   renderDetailCategoryOptions(activeDoc.category || "");
@@ -3897,11 +3939,14 @@ async function openDetails(docId, { syncRoute = true, replaceRoute = false } = {
   renderDetailOverdueAlert();
   await renderDocDuplicateBanners();
 
-  const docLabels = labels.filter((l) => l.group_id === activeDoc.group_id);
+  const docLabels = GROUPS_ENABLED ? labels.filter((l) => l.group_id === activeDoc.group_id) : labels;
   dLabels.innerHTML = docLabels.map((l) => `<option value="${l.id}">${escapeHtml(l.name)}</option>`).join("");
-  Array.from(dLabels.options).forEach((opt) => {
-    opt.selected = activeDoc.label_ids.includes(opt.value);
-  });
+  const preferredName = String(activeDoc.budget_category || activeDoc.bank_paid_category || "").trim().toLowerCase();
+  const match = preferredName ? docLabels.find((l) => String(l.name || "").trim().toLowerCase() === preferredName) : null;
+  const selectedId = match
+    ? String(match.id)
+    : (Array.isArray(activeDoc.label_ids) && activeDoc.label_ids.length ? String(activeDoc.label_ids[0]) : "");
+  if (selectedId) dLabels.value = selectedId;
   detailOcrText.textContent = activeDoc.ocr_text || "Geen OCR tekst beschikbaar.";
   suppressAutoSave = false;
   setViewerTab("original");
@@ -3985,7 +4030,7 @@ async function renderDocumentViewer(docId, contentType) {
 
 async function saveDocumentDetails(silent = false) {
   if (!activeDoc) return;
-  const labelIds = selectedValues(dLabels);
+  const labelIds = selectedValues(dLabels).filter(Boolean).slice(0, 1);
   const parsedAmount = parseAmountWithCurrency(dAmountWithCurrency.value, activeDoc.currency || "EUR");
   const categoryInput = dCategory.value || "";
   const remarkValue = dRemark.value.trim();
@@ -4771,7 +4816,7 @@ window.addEventListener("scroll", () => {
   positionSearchSuggestions();
 }, { passive: true });
 
-[fDocDateFrom, fDocDateTo, fDueDateFrom, fDueDateTo, fMinAmount, fMaxAmount].forEach((el) =>
+[fDocDateFrom, fDocDateTo, fDueDateFrom, fDueDateTo, fPaidDateFrom, fPaidDateTo, fMinAmount, fMaxAmount].forEach((el) =>
   el.addEventListener("input", () => {
     dashboardPage = 1;
     renderDashboard();
@@ -4782,12 +4827,10 @@ clearFacetsBtn.addEventListener("click", () => {
   facetSelections.categories.clear();
   facetSelections.issuers.clear();
   facetSelections.labels.clear();
-  const statusAll = facetStatus.querySelector("input[name='fStatusRadio'][value='']");
-  if (statusAll) statusAll.checked = true;
   const paidAll = facetPaid.querySelector("input[name='fPaidRadio'][value='']");
   if (paidAll) paidAll.checked = true;
   updateFacetOptionsFromDocs();
-  [fDocDateFrom, fDocDateTo, fDueDateFrom, fDueDateTo, fMinAmount, fMaxAmount].forEach((el) => (el.value = ""));
+  [fDocDateFrom, fDocDateTo, fDueDateFrom, fDueDateTo, fPaidDateFrom, fPaidDateTo, fMinAmount, fMaxAmount].forEach((el) => (el.value = ""));
   fMinAmountRange.value = fMinAmountRange.min || "0";
   fMaxAmountRange.value = fMaxAmountRange.max || "10000";
   fMinAmount.value = fMinAmountRange.value;
@@ -4796,10 +4839,6 @@ clearFacetsBtn.addEventListener("click", () => {
   renderDashboard();
 });
 
-facetStatus.addEventListener("change", () => {
-  dashboardPage = 1;
-  renderDashboard();
-});
 facetPaid.addEventListener("change", () => {
   dashboardPage = 1;
   renderDashboard();

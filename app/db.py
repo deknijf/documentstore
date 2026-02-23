@@ -108,6 +108,14 @@ def _ensure_document_columns() -> None:
             conn.execute(text("ALTER TABLE documents ADD COLUMN bank_match_reason TEXT"))
         if not _column_exists(conn, "documents", "bank_match_external_transaction_id"):
             conn.execute(text("ALTER TABLE documents ADD COLUMN bank_match_external_transaction_id VARCHAR(255)"))
+        if not _column_exists(conn, "documents", "bank_paid_category"):
+            conn.execute(text("ALTER TABLE documents ADD COLUMN bank_paid_category VARCHAR(120)"))
+        if not _column_exists(conn, "documents", "bank_paid_category_source"):
+            conn.execute(text("ALTER TABLE documents ADD COLUMN bank_paid_category_source VARCHAR(32)"))
+        if not _column_exists(conn, "documents", "budget_category"):
+            conn.execute(text("ALTER TABLE documents ADD COLUMN budget_category VARCHAR(120)"))
+        if not _column_exists(conn, "documents", "budget_category_source"):
+            conn.execute(text("ALTER TABLE documents ADD COLUMN budget_category_source VARCHAR(32)"))
         if not _column_exists(conn, "documents", "remark"):
             conn.execute(text("ALTER TABLE documents ADD COLUMN remark TEXT"))
         if not _column_exists(conn, "documents", "ocr_processed"):
@@ -471,6 +479,78 @@ def _ensure_bank_columns() -> None:
                 """
             ),
             {"tenant_id": default_tenant_id},
+        )
+
+
+        # De-duplicate labels tenant-wide (trim + case-insensitive).
+        # Older versions created labels in different groups; in the current app labels are tenant-wide.
+        # Merge duplicates by keeping 1 canonical label per normalized name and re-pointing associations.
+        conn.execute(text("UPDATE labels SET name = TRIM(name) WHERE name IS NOT NULL"))
+        dup_keys = conn.execute(
+            text(
+                """
+                SELECT tenant_id AS tenant_id, lower(trim(name)) AS k, COUNT(*) AS c
+                FROM labels
+                WHERE tenant_id IS NOT NULL AND TRIM(tenant_id) != '' AND name IS NOT NULL AND TRIM(name) != ''
+                GROUP BY tenant_id, k
+                HAVING c > 1
+                """
+            )
+        ).mappings().all()
+        for row in dup_keys:
+            tenant_id = str(row["tenant_id"])
+            k = str(row["k"])
+            keep = conn.execute(
+                text(
+                    """
+                    SELECT id
+                    FROM labels
+                    WHERE tenant_id = :tenant_id AND lower(trim(name)) = :k
+                    ORDER BY datetime(created_at) ASC, id ASC
+                    LIMIT 1
+                    """
+                ),
+                {"tenant_id": tenant_id, "k": k},
+            ).mappings().first()
+            if not keep or not keep.get("id"):
+                continue
+            keep_id = str(keep["id"])
+
+            dups = conn.execute(
+                text(
+                    """
+                    SELECT id
+                    FROM labels
+                    WHERE tenant_id = :tenant_id AND lower(trim(name)) = :k AND id != :keep_id
+                    """
+                ),
+                {"tenant_id": tenant_id, "k": k, "keep_id": keep_id},
+            ).mappings().all()
+            for d in dups:
+                dup_id = str(d["id"])
+                # Re-point document_labels associations to the kept label.
+                conn.execute(
+                    text(
+                        """
+                        INSERT OR IGNORE INTO document_labels(document_id, label_id)
+                        SELECT document_id, :keep_id
+                        FROM document_labels
+                        WHERE label_id = :dup_id
+                        """
+                    ),
+                    {"keep_id": keep_id, "dup_id": dup_id},
+                )
+                conn.execute(text("DELETE FROM document_labels WHERE label_id = :dup_id"), {"dup_id": dup_id})
+                conn.execute(text("DELETE FROM labels WHERE id = :dup_id"), {"dup_id": dup_id})
+
+        # Prevent future duplicates (tenant-wide, trimmed, case-insensitive).
+        conn.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_labels_tenant_normname
+                ON labels(tenant_id, lower(trim(name)))
+                """
+            )
         )
         conn.execute(
             text(
