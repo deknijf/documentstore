@@ -66,7 +66,13 @@ docker compose up --build
 - [http://localhost:8000](http://localhost:8000)
 
 5. Login:
-- `admin / admin`
+- Gebruik je eigen account (Signup), of een bestaande admin gebruiker (indien aanwezig).
+
+## Versioning & DB upgrades
+
+- App versions volgen semantic versioning en matchen git tags (bv. `v0.4.2`).
+- Bij startup schrijft Docstore zijn app-versie en DB schema-versie weg in `schema_migrations` (SQLite).
+- Bij toekomstige upgrades met DB-wijzigingen wordt de migratielogica uitgebreid en de schema-versie verhoogd.
 
 ## API-overzicht
 

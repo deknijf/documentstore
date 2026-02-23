@@ -5,6 +5,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from app.config import settings
+from app import __db_schema_version__
 
 
 Path(settings.data_dir).mkdir(parents=True, exist_ok=True)
@@ -19,6 +20,84 @@ class Base(DeclarativeBase):
 
 DEFAULT_TENANT_SLUG = "default"
 DEFAULT_TENANT_NAME = "Default Tenant"
+
+
+def _ensure_schema_migrations(conn) -> None:
+    conn.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                schema_version INTEGER NOT NULL,
+                app_version TEXT NOT NULL,
+                git_tag TEXT,
+                updated_at DATETIME NOT NULL
+            )
+            """
+        )
+    )
+
+
+def _current_schema_version(conn) -> int:
+    # If the table doesn't exist yet (older installs), treat as 0.
+    row = conn.execute(
+        text("SELECT name FROM sqlite_master WHERE type='table' AND name='schema_migrations' LIMIT 1")
+    ).mappings().first()
+    if not row:
+        return 0
+    try:
+        v = conn.execute(text("SELECT schema_version FROM schema_migrations WHERE id = 1")).mappings().first()
+        return int(v["schema_version"]) if v and v.get("schema_version") is not None else 0
+    except Exception:
+        return 0
+
+
+def _apply_pending_migrations(conn) -> None:
+    """
+    Minimal migration framework:
+    - Keep an integer DB schema version in the DB.
+    - Increment app.__db_schema_version__ when DB schema changes.
+    - Add a callable in MIGRATIONS for each new schema version.
+    All migrations must be idempotent.
+    """
+    current = _current_schema_version(conn)
+    target = int(__db_schema_version__)
+    if current >= target:
+        return
+
+    # Future-proof: add explicit migration steps here.
+    MIGRATIONS: dict[int, callable] = {
+        # 1: baseline (introduced schema_migrations table)
+    }
+
+    for v in range(current + 1, target + 1):
+        fn = MIGRATIONS.get(v)
+        if fn:
+            fn(conn)
+
+
+def _record_schema_state(conn) -> None:
+    _ensure_schema_migrations(conn)
+    app_version = str(getattr(settings, "app_version", "") or "").strip() or "0.0.0"
+    git_tag = str(getattr(settings, "git_tag", "") or "").strip() or None
+    conn.execute(
+        text(
+            """
+            INSERT INTO schema_migrations(id, schema_version, app_version, git_tag, updated_at)
+            VALUES (1, :schema_version, :app_version, :git_tag, CURRENT_TIMESTAMP)
+            ON CONFLICT(id) DO UPDATE SET
+              schema_version = excluded.schema_version,
+              app_version = excluded.app_version,
+              git_tag = excluded.git_tag,
+              updated_at = CURRENT_TIMESTAMP
+            """
+        ),
+        {
+            "schema_version": int(__db_schema_version__),
+            "app_version": app_version,
+            "git_tag": git_tag,
+        },
+    )
 
 
 def _ensure_default_tenant(conn) -> str:
@@ -778,6 +857,9 @@ def init_db() -> None:
                 """
             )
         )
+        # Persist schema/app version in DB to support safe upgrades.
+        _apply_pending_migrations(conn)
+        _record_schema_state(conn)
 
 
 def ensure_bootstrap_admin() -> None:
@@ -801,6 +883,10 @@ def ensure_bootstrap_admin() -> None:
                 changed = True
             if not getattr(user, "tenant_id", None):
                 user.tenant_id = tenant.id
+                changed = True
+            # Only bootstrap the password if it is missing; never override an existing password.
+            if not str(getattr(user, "password_hash", "") or "").strip():
+                user.password_hash = hash_password(settings.admin_default_password)
                 changed = True
             if changed:
                 db.commit()

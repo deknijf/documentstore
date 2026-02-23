@@ -13,6 +13,11 @@ class Settings(BaseSettings):
     # Public base URL (used for absolute links in emails, etc.)
     # Example: https://docstore.deknijf.eu
     public_base_url: str | None = None
+    # App version metadata (stored in DB for upgrade tracking; typically equals the git tag without leading "v")
+    # Example: 0.4.2
+    app_version: str = "0.4.2"
+    # Optional git tag/commit metadata for diagnostics. Example: v0.4.2
+    git_tag: str | None = None
 
     # Security / deployment
     # Comma-separated list (or empty) of allowed Host headers.
