@@ -70,7 +70,7 @@ docker compose up --build
 
 ## Versioning & DB upgrades
 
-- App versions volgen semantic versioning en matchen git tags (bv. `v0.4.2`).
+- App versions volgen semantic versioning en matchen git tags (bv. `v0.5.0`).
 - Bij startup schrijft Docstore zijn app-versie en DB schema-versie weg in `schema_migrations` (SQLite).
 - Bij toekomstige upgrades met DB-wijzigingen wordt de migratielogica uitgebreid en de schema-versie verhoogd.
 

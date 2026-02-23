@@ -14,9 +14,9 @@ class Settings(BaseSettings):
     # Example: https://docstore.deknijf.eu
     public_base_url: str | None = None
     # App version metadata (stored in DB for upgrade tracking; typically equals the git tag without leading "v")
-    # Example: 0.4.2
-    app_version: str = "0.4.2"
-    # Optional git tag/commit metadata for diagnostics. Example: v0.4.2
+    # Example: 0.5.0
+    app_version: str = "0.5.0"
+    # Optional git tag/commit metadata for diagnostics. Example: v0.5.0
     git_tag: str | None = None
 
     # Security / deployment

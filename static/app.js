@@ -297,6 +297,8 @@ let dashboardPage = 1;
 let documentsPage = 1;
 const PAGE_SIZE = 12;
 const CATEGORY_PAGE_SIZE = 9;
+// Force fresh thumbnail fetch per page load so regenerated thumbs are visible immediately.
+const THUMBNAIL_CACHE_BUST = Date.now();
 let categoryDocsPage = 1;
 let integrationsCache = null;
 const selectedActiveIds = new Set();
@@ -1717,7 +1719,10 @@ function cardTemplate(doc, opts = {}) {
   const selected = !!opts.selected;
   const inTrash = !!opts.inTrash;
   const showActions = opts.showActions !== false;
-  const thumb = doc.thumbnail_path ? `<img src="${doc.thumbnail_path}" alt="thumb" />` : "";
+  const thumbUrl = doc.thumbnail_path
+    ? `${doc.thumbnail_path}${String(doc.thumbnail_path).includes("?") ? "&" : "?"}v=${THUMBNAIL_CACHE_BUST}`
+    : "";
+  const thumb = thumbUrl ? `<img src="${thumbUrl}" alt="thumb" />` : "";
   const title = doc.issuer || doc.subject || doc.filename;
   const subtitle = doc.subject || doc.filename;
   const amount = formatAmountWithCurrency(doc.currency, doc.total_amount);
