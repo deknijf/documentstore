@@ -110,6 +110,20 @@ const fieldDueDateWrap = document.getElementById("fieldDueDateWrap");
 const fieldIbanWrap = document.getElementById("fieldIbanWrap");
 const fieldStructuredRefWrap = document.getElementById("fieldStructuredRefWrap");
 const fieldLineItemsWrap = document.getElementById("fieldLineItemsWrap");
+const detailConfidenceWrap = document.getElementById("detailConfidenceWrap");
+const detailConfidenceToggleBtn = document.getElementById("detailConfidenceToggleBtn");
+const detailConfidenceToggleIcon = document.getElementById("detailConfidenceToggleIcon");
+const detailConfidenceHints = document.getElementById("detailConfidenceHints");
+const DETAIL_CONFIDENCE_FIELDS = {
+  subject: "dSubject",
+  issuer: "dIssuer",
+  document_date: "dDocumentDate",
+  due_date: "dDueDate",
+  total_amount: "dAmountWithCurrency",
+  iban: "dIban",
+  structured_reference: "dStructuredRef",
+  paid_on: "dPaidOn",
+};
 
 const labelName = document.getElementById("labelName");
 const labelGroup = document.getElementById("labelGroup");
@@ -289,6 +303,7 @@ let autoSaveTimer = null;
 let isSavingDetail = false;
 let pendingDetailSave = false;
 let suppressAutoSave = false;
+let detailConfidenceCollapsed = true;
 let mailAttachmentTypes = ["pdf"];
 let searchDebounceTimer = null;
 let searchRequestSeq = 0;
@@ -1764,6 +1779,9 @@ function cardTemplate(doc, opts = {}) {
   if (doc.status === "ready" && doc.ocr_processed) parseChips.push('<span class="doc-chip ok">OCR</span>');
   if (doc.status === "ready" && doc.ai_processed) parseChips.push('<span class="doc-chip soft">AI</span>');
   if (doc.bank_paid_verified) parseChips.push('<span class="doc-chip paid">PAID</span>');
+  if (Array.isArray(doc.low_confidence_fields) && doc.low_confidence_fields.length) {
+    parseChips.push(`<span class="doc-chip warn" title="Lage OCR/AI confidence op ${doc.low_confidence_fields.length} veld(en)">LOW</span>`);
+  }
   const budgetLabel = String(doc.budget_category || doc.bank_paid_category || "").trim();
   const budgetLabelSource = String(doc.budget_category_source || doc.bank_paid_category_source || "").trim().toLowerCase();
   const budgetSourceBadge =
@@ -3941,6 +3959,8 @@ async function openDetails(docId, { syncRoute = true, replaceRoute = false } = {
   dPaidOn.value = activeDoc.paid_on || "";
   dRemark.value = activeDoc.remark || "";
   applyDetailCategoryFields(activeDoc.category || "");
+  detailConfidenceCollapsed = true;
+  renderDetailFieldConfidence(activeDoc);
   renderDetailOverdueAlert();
   await renderDocDuplicateBanners();
 
@@ -3994,7 +4014,19 @@ async function renderDocumentViewer(docId, contentType) {
   }
   const blob = await res.blob();
   viewerObjectUrl = URL.createObjectURL(blob);
-  if (contentType && contentType.startsWith("image/")) {
+  const responseType = String(res.headers.get("content-type") || "").toLowerCase();
+  const blobType = String(blob.type || "").toLowerCase();
+  const declaredType = String(contentType || "").toLowerCase();
+  const isPdf =
+    declaredType.includes("pdf") ||
+    responseType.includes("application/pdf") ||
+    blobType.includes("application/pdf");
+  const isImage =
+    (!isPdf && declaredType.startsWith("image/")) ||
+    (!isPdf && responseType.startsWith("image/")) ||
+    (!isPdf && blobType.startsWith("image/"));
+
+  if (isImage) {
     imageZoomLevel = 1;
     detailViewerWrap.innerHTML = `
       <div class="image-zoom-toolbar">
@@ -4026,8 +4058,8 @@ async function renderDocumentViewer(docId, contentType) {
     updateImageZoomUI();
     return;
   }
-  if (contentType === "application/pdf") {
-    detailViewerWrap.innerHTML = `<iframe src="${viewerObjectUrl}#zoom=125&view=FitH" title="Document viewer"></iframe>`;
+  if (isPdf) {
+    detailViewerWrap.innerHTML = `<iframe src="${viewerObjectUrl}#page=1&zoom=page-fit" title="Document viewer"></iframe>`;
     return;
   }
   detailViewerWrap.innerHTML = `<iframe src="${viewerObjectUrl}" title="Document viewer"></iframe>`;
@@ -4079,11 +4111,195 @@ async function saveDocumentDetails(silent = false) {
   renderLineItemsEditor();
   activeDocExtraFields = { ...(activeDoc.extra_fields || {}) };
   suppressAutoSave = false;
+  renderDetailFieldConfidence(activeDoc);
   renderDetailOverdueAlert();
   await loadLabels();
   await loadDocs();
   await loadTrashDocs();
   if (!silent) alert("Document opgeslagen");
+}
+
+function renderDetailFieldConfidence(doc) {
+  const keyLabel = (key) =>
+    key === "subject" ? "Titel / onderwerp"
+    : key === "issuer" ? "Afzender"
+    : key === "document_date" ? "Documentdatum"
+    : key === "due_date" ? "Due date"
+    : key === "total_amount" ? "Bedrag"
+    : key === "iban" ? "IBAN"
+    : key === "structured_reference" ? "Gestructureerde mededeling"
+    : key === "paid_on" ? "Betaald op"
+    : paramLabel(key);
+  const levelFromScore = (score) => {
+    if (!Number.isFinite(score)) return "unknown";
+    if (score < 0.65) return "low";
+    if (score < 0.85) return "medium";
+    return "high";
+  };
+  const sourceText = (v) => String(v || "").trim().toLowerCase() || "ocr_ai";
+
+  Object.values(DETAIL_CONFIDENCE_FIELDS).forEach((id) => {
+    const input = document.getElementById(id);
+    const field = input?.closest(".form-field");
+    const label = field?.querySelector("label");
+    if (field) field.classList.remove("low-confidence");
+    if (label) {
+      label.classList.remove("has-low-confidence");
+      const existing = label.querySelector(".field-confidence");
+      if (existing) existing.remove();
+    }
+  });
+  if (dynamicDetailFields) {
+    dynamicDetailFields.querySelectorAll(".dynamic-field-row label .field-confidence").forEach((el) => el.remove());
+  }
+
+  if (detailConfidenceHints) {
+    detailConfidenceHints.classList.add("hidden");
+    detailConfidenceHints.innerHTML = "";
+  }
+  if (detailConfidenceWrap) detailConfidenceWrap.classList.add("hidden");
+
+  const confidence = doc && typeof doc.field_confidence === "object" && doc.field_confidence ? doc.field_confidence : {};
+  const rows = [];
+  const badgeMetaByKey = {};
+
+  // Include all filled category parameters (known + dynamic).
+  const extras = doc && typeof doc.extra_fields === "object" && doc.extra_fields ? doc.extra_fields : {};
+  const paramKeys = getCategoryParamConfig(doc?.category || "").map((x) => x.key);
+  const valueForKey = (key) => {
+    if (key === "subject") return doc?.subject || "";
+    if (key === "issuer") return doc?.issuer || "";
+    if (key === "category") return doc?.category || "";
+    if (key === "document_date") return doc?.document_date || "";
+    if (key === "due_date") return doc?.due_date || "";
+    if (key === "total_amount") return formatAmountWithCurrency(doc?.currency, doc?.total_amount) || "";
+    if (key === "currency") return doc?.currency || "";
+    if (key === "iban") return doc?.iban || "";
+    if (key === "structured_reference") return doc?.structured_reference || "";
+    if (key === "paid") return doc?.paid ? "betaald" : "";
+    if (key === "paid_on") return doc?.paid_on || "";
+    if (key === "items") return doc?.line_items || "";
+    return extras[key] || "";
+  };
+
+  paramKeys.forEach((key) => {
+    const rawVal = String(valueForKey(key) || "").trim();
+    if (!rawVal) return;
+    const entry = confidence[key];
+    const score = Number.isFinite(Number(entry?.score)) ? Math.max(0, Math.min(1, Number(entry.score))) : NaN;
+    const scoreNum = Number.isFinite(score) ? Math.round(score * 100) : NaN;
+    const level = levelFromScore(score);
+    const source = sourceText(entry?.source);
+    const reason = String(entry?.reason || "").trim() || "Geen expliciete confidence-score beschikbaar.";
+    const row = {
+      key,
+      fieldLabel: keyLabel(key),
+      scoreNum,
+      level,
+      source,
+      reason,
+      inputId: DETAIL_CONFIDENCE_FIELDS[key] || null,
+    };
+    rows.push(row);
+    badgeMetaByKey[key] = row;
+  });
+
+  // Fallback: keep known confidence rows even if category profile is unusual.
+  Object.entries(DETAIL_CONFIDENCE_FIELDS).forEach(([key, inputId]) => {
+    if (badgeMetaByKey[key]) return;
+    const entry = confidence[key];
+    if (!entry || typeof entry !== "object") return;
+    const scoreNum = Number(entry.score);
+    const score = Number.isFinite(scoreNum) ? Math.max(0, Math.min(1, scoreNum)) : NaN;
+    const percent = Number.isFinite(score) ? Math.round(score * 100) : NaN;
+    rows.push({
+      key,
+      fieldLabel: keyLabel(key),
+      scoreNum: percent,
+      level: levelFromScore(score),
+      source: sourceText(entry.source),
+      reason: String(entry.reason || "").trim() || "Geen expliciete confidence-score beschikbaar.",
+      inputId,
+    });
+  });
+
+  const attachLabelBadge = (label, row) => {
+    if (!label || !row) return;
+    const badge = document.createElement("span");
+    const classes = [`field-confidence`, row.level];
+    if (row.source === "manual") classes.push("manual");
+    if (row.source !== "manual") {
+      classes.push("field-confidence-clickable");
+      badge.dataset.confirmConfidenceField = row.key;
+    }
+    badge.className = classes.join(" ");
+    badge.textContent = Number.isFinite(row.scoreNum) ? `${row.scoreNum}%` : "--";
+    badge.title = `${row.reason || ""}${row.source ? `${row.reason ? " · " : ""}bron: ${row.source}` : ""}${
+      row.source !== "manual" ? " · Klik om dit veld te bevestigen" : ""
+    }`.trim();
+    label.appendChild(badge);
+    if (row.level === "low") {
+      const field = label.closest(".form-field");
+      field?.classList.add("low-confidence");
+      label.classList.add("has-low-confidence");
+    }
+  };
+
+  rows.forEach((row) => {
+    if (row.inputId) {
+      const input = document.getElementById(row.inputId);
+      const label = input?.closest(".form-field")?.querySelector("label");
+      attachLabelBadge(label, row);
+      return;
+    }
+    if (!KNOWN_FIELD_KEYS.has(row.key) && dynamicDetailFields) {
+      const input = dynamicDetailFields.querySelector(`input[data-extra-field="${row.key}"]`);
+      const label = input?.closest(".dynamic-field-row")?.querySelector("label");
+      attachLabelBadge(label, row);
+    }
+  });
+
+  if (detailConfidenceHints && rows.length) {
+    detailConfidenceHints.innerHTML = `
+      ${rows
+        .map(
+          (r) => `
+            <div class="detail-confidence-row ${r.level === "low" ? "is-low" : ""}">
+              <span class="detail-confidence-field">${escapeHtml(r.fieldLabel)}</span>
+              <span class="detail-confidence-score">${Number.isFinite(r.scoreNum) ? `${r.scoreNum}%` : "--"}</span>
+              <span class="detail-confidence-source">${escapeHtml(String(r.source).toUpperCase())}</span>
+              <span class="detail-confidence-reason">${escapeHtml(r.reason)}</span>
+            </div>
+          `,
+        )
+        .join("")}
+    `;
+    if (detailConfidenceWrap) detailConfidenceWrap.classList.remove("hidden");
+    applyDetailConfidenceCollapse();
+  }
+}
+
+function applyDetailConfidenceCollapse() {
+  if (!detailConfidenceHints) return;
+  const collapsed = !!detailConfidenceCollapsed;
+  detailConfidenceHints.classList.toggle("hidden", collapsed);
+  if (detailConfidenceToggleIcon) detailConfidenceToggleIcon.textContent = collapsed ? "▾" : "▴";
+}
+
+async function confirmDetailFieldConfidence(fieldKey) {
+  if (!activeDoc || !fieldKey) return;
+  const res = await authFetch(`/api/documents/${activeDoc.id}/confidence/confirm`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ field_key: fieldKey }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    return alert(err.detail || "Veld bevestigen mislukt");
+  }
+  activeDoc = await res.json();
+  renderDetailFieldConfidence(activeDoc);
+  await loadDocs();
 }
 
 async function runDetailAutoSave() {
@@ -5068,6 +5284,10 @@ detailDownloadBtn.addEventListener("click", () => {
 });
 viewerTabOriginal.addEventListener("click", () => setViewerTab("original"));
 viewerTabOcr.addEventListener("click", () => setViewerTab("ocr"));
+detailConfidenceToggleBtn?.addEventListener("click", () => {
+  detailConfidenceCollapsed = !detailConfidenceCollapsed;
+  applyDetailConfidenceCollapse();
+});
 
 [
   dSubject,
@@ -5085,6 +5305,14 @@ dCategory.addEventListener("change", () => applyDetailCategoryFields(dCategory.v
 dCategory.addEventListener("change", renderDetailOverdueAlert);
 dDueDate.addEventListener("input", renderDetailOverdueAlert);
 dPaid.addEventListener("change", renderDetailOverdueAlert);
+document.querySelector(".detail-form")?.addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-confirm-confidence-field]");
+  if (!btn) return;
+  const fieldKey = btn.dataset.confirmConfidenceField || "";
+  if (!fieldKey) return;
+  if (btn.classList.contains("manual")) return;
+  await confirmDetailFieldConfidence(fieldKey);
+});
 addLineItemBtn.addEventListener("click", () => {
   const currentCategory = dCategory?.value || activeDoc?.category || "";
   if (isKasticketCategory(currentCategory)) return;

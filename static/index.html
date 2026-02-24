@@ -3,8 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#1E4A8B" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <title>Document Store</title>
-    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="manifest" href="/manifest.webmanifest?v=20260224a" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=20260224a" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-round-32.png?v=20260224b" />
+    <link rel="icon" type="image/x-icon" href="/favicon-round.ico?v=20260224b" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -295,6 +300,13 @@
                 <button id="detailBackBtn" class="ghost btn-action" type="button">Terug</button>
               </div>
               <div id="detailLabelPills" class="detail-label-pills"></div>
+              <div id="detailConfidenceWrap" class="detail-confidence-wrap hidden">
+                <button id="detailConfidenceToggleBtn" class="ghost detail-confidence-toggle" type="button" aria-label="OCR/AI confidence uitklappen">
+                  <span>OCR/AI confidence</span>
+                  <span id="detailConfidenceToggleIcon">▾</span>
+                </button>
+                <div id="detailConfidenceHints" class="detail-confidence-hints hidden"></div>
+              </div>
               <div class="grid detail-fields">
                 <div class="form-field">
                   <label for="dSubject">Titel / onderwerp</label>

@@ -1234,6 +1234,7 @@ button:disabled {
 .doc-chip.soft { background: #e4f5ea; color: #226540; }
 .doc-chip.ok { background: #d8f4ea; color: #157c56; }
 .doc-chip.paid { background: #eadbff; color: #5f3a9c; }
+.doc-chip.warn { background: #fff0d9; color: #9a5b15; }
 .doc-chip.pending { background: #dcecff; color: #245b9f; }
 .doc-chip.failed { background: #ffe7eb; color: #ba3f58; }
 
@@ -1286,6 +1287,72 @@ button:disabled {
   flex-wrap: wrap;
   gap: 0.35rem;
   margin: 0.25rem 0 0.65rem;
+}
+
+.detail-confidence-hints {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 8px;
+  border-radius: 10px;
+  background: #edf3fc;
+}
+
+.detail-confidence-wrap {
+  margin: 0 0 10px;
+}
+
+.detail-confidence-toggle {
+  width: 100% !important;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-radius: 10px;
+  padding: 9px 12px;
+  background: #e8eef8;
+  color: #4a6391;
+  box-shadow: none;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.detail-confidence-row {
+  display: grid;
+  grid-template-columns: 1.2fr auto auto 2fr;
+  gap: 8px;
+  align-items: center;
+  font-size: 0.72rem;
+  color: #3b5078;
+  background: #f6f9ff;
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+
+.detail-confidence-row.is-low {
+  background: #fff4f6;
+}
+
+.detail-confidence-field {
+  font-weight: 700;
+}
+
+.detail-confidence-score {
+  font-weight: 800;
+  color: #2f5f9f;
+}
+
+.detail-confidence-row.is-low .detail-confidence-score {
+  color: #ba3f58;
+}
+
+.detail-confidence-source {
+  font-weight: 700;
+  color: #5a7098;
+}
+
+.detail-confidence-reason {
+  color: #5f7399;
 }
 
 .doc-bank-category-pill {
@@ -2331,6 +2398,74 @@ button:disabled {
   font-weight: 600;
 }
 
+.detail-fields .form-field label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.field-confidence {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.field-confidence-clickable {
+  cursor: pointer;
+  transition: transform 0.14s ease, filter 0.14s ease;
+}
+
+.field-confidence-clickable:hover {
+  transform: translateY(-1px);
+  filter: brightness(0.97);
+}
+
+.field-confidence-clickable.manual {
+  cursor: default;
+}
+
+.field-confidence.high {
+  background: #d8f4ea;
+  color: #157c56;
+}
+
+.field-confidence.medium {
+  background: #e7effc;
+  color: #2f5f9f;
+}
+
+.field-confidence.low {
+  background: #ffe7eb;
+  color: #ba3f58;
+}
+
+.field-confidence.manual {
+  background: #eadbff;
+  color: #5f3a9c;
+}
+
+.field-confidence.unknown {
+  background: #e6eef8;
+  color: #60779f;
+}
+
+.detail-fields .form-field.low-confidence input,
+.detail-fields .form-field.low-confidence select,
+.detail-fields .form-field.low-confidence textarea {
+  background: #fff7f8;
+}
+
+.detail-fields .form-field label.has-low-confidence {
+  color: #9f3e56;
+}
+
 .detail-layout {
   display: grid;
   grid-template-columns: 360px 1fr;
@@ -2974,6 +3109,10 @@ dialog {
   }
   .detail-actions .btn-action {
     flex: 1;
+  }
+  .detail-confidence-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
   }
   .viewer-wrap,
   .viewer-wrap iframe,

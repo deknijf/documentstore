@@ -14,15 +14,18 @@ class Settings(BaseSettings):
     # Example: https://docstore.deknijf.eu
     public_base_url: str | None = None
     # App version metadata (stored in DB for upgrade tracking; typically equals the git tag without leading "v")
-    # Example: 0.5.0
-    app_version: str = "0.5.0"
-    # Optional git tag/commit metadata for diagnostics. Example: v0.5.0
+    # Example: 0.6.0
+    app_version: str = "0.6.0"
+    # Optional git tag/commit metadata for diagnostics. Example: v0.6.0
     git_tag: str | None = None
 
     # Security / deployment
     # Comma-separated list (or empty) of allowed Host headers.
     # Example: "docstore.deknijf.eu,localhost,127.0.0.1"
     allowed_hosts: str = ""
+    # Optional comma-separated CIDR ranges for local/dev host access.
+    # Example: "10.10.1.0/24"
+    allowed_host_cidrs: str = ""
     # Comma-separated list (or empty) of CORS allow origins.
     # Example: "https://docstore.deknijf.eu"
     cors_allow_origins: str = ""

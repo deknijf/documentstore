@@ -1,8 +1,8 @@
 __all__ = ["__version__", "__db_schema_version__"]
 
-# App semantic version (aligned with git tags like v0.5.0).
-__version__ = "0.5.0"
+# App semantic version (aligned with git tags like v0.6.0).
+__version__ = "0.6.0"
 
 # Database schema version (integer, increment only when DB schema/migration logic changes).
 # This is stored in the DB to support safe upgrades.
-__db_schema_version__ = 1
+__db_schema_version__ = 2

@@ -1,4 +1,5 @@
 from pathlib import Path
+import ipaddress
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,11 +14,27 @@ from app.routers import admin, audit, auth, bank, catalog, documents, health, jo
 def _split_csv_env(value: str) -> list[str]:
     return [p.strip() for p in (value or "").split(",") if p.strip()]
 
+def _expand_allowed_hosts_with_cidrs(hosts: list[str], cidrs_csv: str) -> list[str]:
+    expanded = list(hosts)
+    for raw in _split_csv_env(cidrs_csv):
+        try:
+            net = ipaddress.ip_network(raw, strict=False)
+        except ValueError:
+            continue
+        # TrustedHostMiddleware expects explicit hostnames/ip strings; it does not accept CIDR.
+        for ip in net.hosts():
+            expanded.append(str(ip))
+    # Keep order stable while removing duplicates.
+    return list(dict.fromkeys(expanded))
+
 
 app = FastAPI(title=settings.app_name)
 
 # Middleware (same behavior as before)
-allowed_hosts = _split_csv_env(settings.allowed_hosts)
+allowed_hosts = _expand_allowed_hosts_with_cidrs(
+    _split_csv_env(settings.allowed_hosts),
+    settings.allowed_host_cidrs,
+)
 if allowed_hosts:
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 

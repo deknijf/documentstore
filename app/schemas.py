@@ -41,6 +41,8 @@ class DocumentOut(BaseModel):
     deleted_at: datetime | None
     line_items: str | None
     extra_fields: dict[str, str] = Field(default_factory=dict)
+    field_confidence: dict[str, dict] = Field(default_factory=dict)
+    low_confidence_fields: list[str] = Field(default_factory=list)
     label_ids: list[str] = Field(default_factory=list)
     label_names: list[str] = Field(default_factory=list)
     created_at: datetime

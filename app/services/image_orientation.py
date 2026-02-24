@@ -36,7 +36,16 @@ def _orientation_score(img: Image.Image) -> float:
             col_sums[x] += ink
 
     # Horizontal text creates stronger banding in rows than in columns.
-    return _variance(row_sums) - (_variance(col_sums) * 0.35)
+    band_score = _variance(row_sums) - (_variance(col_sums) * 0.35)
+
+    # Distinguish 0° vs 180° by preferring layouts with slightly more ink in the top third.
+    # This helps for invoices/letters where headers usually appear near the top.
+    total_ink = sum(row_sums) or 1.0
+    top_ink = sum(row_sums[: max(1, h // 3)])
+    bottom_ink = sum(row_sums[h - max(1, h // 3) :])
+    vertical_bias = (top_ink - bottom_ink) / total_ink
+
+    return band_score + (vertical_bias * 300.0)
 
 
 def orientation_score(img: Image.Image) -> float:
@@ -58,7 +67,7 @@ def orient_image_upright(img: Image.Image) -> Image.Image:
         if score > best_score + 1e-6:
             best_angle, best_img, best_score = angle, cand, score
 
-    # If best score is almost equal, keep original orientation to avoid over-rotation.
-    if best_angle != 0 and abs(best_score - _orientation_score(base)) < 0.01:
+    # If score gain is too small, keep original orientation to avoid over-rotation.
+    if best_angle != 0 and abs(best_score - _orientation_score(base)) < 60.0:
         return base
     return best_img

@@ -1,13 +1,16 @@
 import json
 import hashlib
 import re
+import uuid
+from datetime import datetime
+from difflib import SequenceMatcher
 
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, text
 
 from app.config import settings
 from app.db import upsert_search_index
-from app.models import BankCategoryMapping, Document, CategoryCatalog, Group, Label
+from app.models import BankCategoryMapping, Document, CategoryCatalog, ExtractionHint, Group, Label
 from app.services.ai_extractor import get_ai_extractor
 from app.services.bank_budget_ai import _call_llm
 from app.services.integration_settings import get_runtime_settings
@@ -67,6 +70,287 @@ def _extract_structured_reference_from_text(text: str | None) -> str | None:
     if near:
         return _normalize_structured_reference(near.group(2))
     return None
+
+
+def _normalize_iban(value: str | None) -> str:
+    return re.sub(r"[^A-Za-z0-9]", "", str(value or "")).upper()
+
+
+def _iban_checksum_valid(iban: str | None) -> bool:
+    normalized = _normalize_iban(iban)
+    if len(normalized) < 15 or len(normalized) > 34:
+        return False
+    if not re.match(r"^[A-Z]{2}[0-9]{2}[A-Z0-9]+$", normalized):
+        return False
+    rearranged = normalized[4:] + normalized[:4]
+    converted = []
+    for ch in rearranged:
+        if ch.isalpha():
+            converted.append(str(ord(ch) - 55))
+        else:
+            converted.append(ch)
+    try:
+        return int("".join(converted)) % 97 == 1
+    except Exception:
+        return False
+
+
+def _is_iso_date(value: str | None) -> bool:
+    raw = str(value or "").strip()
+    if not raw:
+        return False
+    try:
+        datetime.strptime(raw, "%Y-%m-%d")
+        return True
+    except Exception:
+        return False
+
+
+def _contains_date_variant(ocr_text: str, iso_date: str) -> bool:
+    if not iso_date or not ocr_text:
+        return False
+    raw = str(ocr_text or "")
+    if iso_date in raw:
+        return True
+    try:
+        dt = datetime.strptime(iso_date, "%Y-%m-%d")
+        dmy = dt.strftime("%d/%m/%Y")
+        dmy_dash = dt.strftime("%d-%m-%Y")
+        ymd_slash = dt.strftime("%Y/%m/%d")
+        return any(x in raw for x in [dmy, dmy_dash, ymd_slash])
+    except Exception:
+        return False
+
+
+def _amount_appears_in_text(amount: float | int | None, ocr_text: str | None) -> bool:
+    if amount is None:
+        return False
+    raw = str(ocr_text or "")
+    try:
+        val = float(amount)
+    except Exception:
+        return False
+    if not raw.strip():
+        return False
+    candidates = {
+        f"{val:.2f}",
+        f"{val:.1f}",
+        str(int(val)) if float(val).is_integer() else "",
+    }
+    amount_comma = f"{val:.2f}".replace(".", ",")
+    candidates.update(
+        {
+            amount_comma,
+            amount_comma.replace(",", "."),
+            amount_comma.replace(",", ""),
+            f"{val:.2f}".replace(".", ""),
+        }
+    )
+    candidates = {c for c in candidates if c}
+    return any(c in raw for c in candidates)
+
+
+def _build_field_confidence(doc: Document, ocr_text: str | None) -> dict[str, dict]:
+    text = str(ocr_text or "")
+    lower_text = text.lower()
+    conf: dict[str, dict] = {}
+
+    if doc.category:
+        cat = str(doc.category).strip()
+        score = 0.58
+        reasons = ["Categorie herkend."]
+        if cat and cat.lower() in lower_text:
+            score += 0.28
+            reasons.append("Categoriebenaming teruggevonden in OCR-tekst.")
+        conf["category"] = {"score": round(min(1.0, score), 2), "reason": " ".join(reasons), "source": "ocr_ai"}
+
+    if doc.total_amount is not None:
+        score = 0.55
+        reasons = ["Bedrag numeriek herkend."]
+        if doc.currency:
+            score += 0.12
+            reasons.append("Valuta aanwezig.")
+        if _amount_appears_in_text(doc.total_amount, text):
+            score += 0.25
+            reasons.append("Bedrag teruggevonden in OCR-tekst.")
+        conf["total_amount"] = {"score": round(min(1.0, score), 2), "reason": " ".join(reasons), "source": "ocr_ai"}
+
+    normalized_iban = _normalize_iban(doc.iban)
+    if normalized_iban:
+        score = 0.45
+        reasons = ["IBAN patroon herkend."]
+        if _iban_checksum_valid(normalized_iban):
+            score += 0.35
+            reasons.append("IBAN checksum geldig.")
+        if normalized_iban in _normalize_iban(text):
+            score += 0.15
+            reasons.append("IBAN teruggevonden in OCR-tekst.")
+        conf["iban"] = {"score": round(min(1.0, score), 2), "reason": " ".join(reasons), "source": "ocr_ai"}
+
+    if doc.structured_reference:
+        score = 0.45
+        reasons = []
+        if re.match(r"^\d{3}/\d{4}/\d{5}$", str(doc.structured_reference or "").strip()):
+            score += 0.35
+            reasons.append("Belgisch formaat 3/4/5 geldig.")
+        if str(doc.structured_reference) in text:
+            score += 0.15
+            reasons.append("Referentie teruggevonden in OCR-tekst.")
+        conf["structured_reference"] = {
+            "score": round(min(1.0, score), 2),
+            "reason": " ".join(reasons) or "Gestructureerde mededeling herkend.",
+            "source": "ocr_ai",
+        }
+
+    for key in ["document_date", "due_date", "paid_on"]:
+        value = getattr(doc, key, None)
+        if not value:
+            continue
+        score = 0.35
+        reasons = []
+        if _is_iso_date(value):
+            score += 0.4
+            reasons.append("Geldig ISO datumformaat.")
+            if _contains_date_variant(text, value):
+                score += 0.2
+                reasons.append("Datum teruggevonden in OCR-tekst.")
+        conf[key] = {"score": round(min(1.0, score), 2), "reason": " ".join(reasons), "source": "ocr_ai"}
+
+    if doc.issuer:
+        score = 0.45
+        reasons = ["Afzender herkend."]
+        issuer = str(doc.issuer).strip().lower()
+        if issuer and issuer in text.lower():
+            score += 0.25
+            reasons.append("Afzender teruggevonden in OCR-tekst.")
+        conf["issuer"] = {"score": round(min(1.0, score), 2), "reason": " ".join(reasons), "source": "ocr_ai"}
+
+    if doc.subject:
+        score = 0.5
+        reasons = ["Onderwerp herkend."]
+        if len(str(doc.subject).strip()) >= 8:
+            score += 0.15
+        conf["subject"] = {"score": round(min(1.0, score), 2), "reason": " ".join(reasons), "source": "ocr_ai"}
+
+    if getattr(doc, "extra_fields_json", None):
+        try:
+            loaded = json.loads(str(doc.extra_fields_json or ""))
+            if isinstance(loaded, dict):
+                for k, v in loaded.items():
+                    key = str(k).strip()
+                    value = str(v).strip() if v is not None else ""
+                    if not key or not value:
+                        continue
+                    score = 0.52
+                    reasons = ["Aangepast veld herkend."]
+                    if len(value) >= 4:
+                        score += 0.1
+                    if value.lower() in lower_text:
+                        score += 0.28
+                        reasons.append("Waarde teruggevonden in OCR-tekst.")
+                    conf[key] = {
+                        "score": round(min(1.0, score), 2),
+                        "reason": " ".join(reasons),
+                        "source": "ocr_ai",
+                    }
+        except Exception:
+            pass
+
+    return conf
+
+
+def _normalize_training_value(value: str | None) -> str:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return ""
+    raw = re.sub(r"\s+", " ", raw)
+    raw = re.sub(r"[^\w\s/\-\.]", "", raw)
+    return raw.strip()
+
+
+def _similar_enough(a: str, b: str) -> bool:
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    if len(a) >= 5 and (a in b or b in a):
+        return True
+    return SequenceMatcher(None, a, b).ratio() >= 0.92
+
+
+def _apply_extraction_hints(
+    db: Session,
+    *,
+    tenant_id: str,
+    category: str | None,
+    metadata: dict,
+) -> dict[str, dict]:
+    """
+    Reuse manual correction history as lightweight training:
+    if extracted value looks like a previously corrected old_value, replace with new_value.
+    """
+    if not tenant_id or not isinstance(metadata, dict):
+        return {}
+    hint_applied: dict[str, dict] = {}
+    trainable = {
+        "issuer",
+        "subject",
+        "category",
+        "document_date",
+        "due_date",
+        "total_amount",
+        "currency",
+        "iban",
+        "structured_reference",
+    }
+    rows = (
+        db.query(ExtractionHint)
+        .filter(ExtractionHint.tenant_id == tenant_id)
+        .order_by(ExtractionHint.created_at.desc())
+        .limit(1000)
+        .all()
+    )
+    for field in trainable:
+        raw = metadata.get(field)
+        raw_s = "" if raw is None else str(raw).strip()
+        if not raw_s:
+            continue
+        n_raw = _normalize_training_value(raw_s)
+        if not n_raw:
+            continue
+        for h in rows:
+            if str(getattr(h, "field_key", "") or "").strip() != field:
+                continue
+            if not str(getattr(h, "new_value", "") or "").strip():
+                continue
+            hint_category = str(getattr(h, "category", "") or "").strip().lower()
+            if category and hint_category and hint_category != str(category).strip().lower():
+                continue
+            old_v = str(getattr(h, "old_value", "") or "").strip()
+            if not old_v:
+                continue
+            n_old = _normalize_training_value(old_v)
+            if not _similar_enough(n_raw, n_old):
+                continue
+            new_v = str(getattr(h, "new_value", "") or "").strip()
+            if not new_v:
+                continue
+            if _normalize_training_value(new_v) == n_raw:
+                # Same value as already extracted, still mark as reinforced learning.
+                hint_applied[field] = {
+                    "score": 0.97,
+                    "reason": "Bevestigd door eerdere manuele validatie.",
+                    "source": "hint",
+                }
+            else:
+                metadata[field] = new_v
+                hint_applied[field] = {
+                    "score": 0.95,
+                    "reason": f"Gecorrigeerd via eerdere manuele validatie ({old_v} -> {new_v}).",
+                    "source": "hint",
+                }
+            break
+    return hint_applied
 
 
 def _get_ocr_provider(provider_name: str, runtime: dict):
@@ -129,15 +413,34 @@ def _ensure_doc_has_label(db: Session, *, doc: Document, label_name: str) -> Non
     group_id = str(getattr(doc, "group_id", "") or "").strip() or _ensure_tenant_default_group_id(db, tenant_id=str(doc.tenant_id or ""))
     if not group_id:
         return
+    # Labels are tenant-wide (unique on normalized name). Never key on group_id here.
     label = (
         db.query(Label)
-        .filter(Label.tenant_id == doc.tenant_id, Label.group_id == group_id, func.lower(Label.name) == name.lower())
+        .filter(Label.tenant_id == doc.tenant_id, func.lower(func.trim(Label.name)) == name.strip().lower())
         .first()
     )
     if not label:
-        label = Label(tenant_id=doc.tenant_id, name=name, group_id=group_id)
-        db.add(label)
-        db.flush()
+        db.execute(
+            text(
+                """
+                INSERT OR IGNORE INTO labels (id, tenant_id, name, group_id, created_at)
+                VALUES (:id, :tenant_id, :name, :group_id, CURRENT_TIMESTAMP)
+                """
+            ),
+            {
+                "id": str(uuid.uuid4()),
+                "tenant_id": str(doc.tenant_id),
+                "name": name,
+                "group_id": group_id,
+            },
+        )
+        label = (
+            db.query(Label)
+            .filter(Label.tenant_id == doc.tenant_id, func.lower(func.trim(Label.name)) == name.strip().lower())
+            .first()
+        )
+        if not label:
+            return
     if label not in (doc.labels or []):
         doc.labels.append(label)
 
@@ -204,22 +507,14 @@ def _apply_bank_mapping_labels(db: Session, *, doc: Document, ocr_text: str) -> 
         matched_category = picked[0]
         doc.budget_category = matched_category
         doc.budget_category_source = "mapping"
-        # Single-label system: mapping defines the primary label.
-        try:
-            # Ensure label exists and then replace doc.labels with only this label.
-            group_id = str(getattr(doc, "group_id", "") or "").strip() or _ensure_tenant_default_group_id(db, tenant_id=tenant_id)
-            label = (
-                db.query(Label)
-                .filter(Label.tenant_id == doc.tenant_id, Label.group_id == group_id, func.lower(Label.name) == matched_category.lower())
-                .first()
-            )
-            if not label:
-                label = Label(tenant_id=doc.tenant_id, name=matched_category.strip(), group_id=group_id)
-                db.add(label)
-                db.flush()
+        _ensure_doc_has_label(db, doc=doc, label_name=matched_category)
+        label = (
+            db.query(Label)
+            .filter(Label.tenant_id == doc.tenant_id, func.lower(func.trim(Label.name)) == matched_category.strip().lower())
+            .first()
+        )
+        if label:
             doc.labels = [label]
-        except Exception:
-            _ensure_doc_has_label(db, doc=doc, label_name=matched_category)
         return
 
     # If no mapping hit: keep existing manual/mapping label, otherwise infer with LLM (AI pill).
@@ -388,6 +683,7 @@ def process_document(db: Session, document_id: str, ocr_provider_name: str | Non
 
         metadata: dict = {}
         category_profiles: list[dict] = []
+        hint_confidence_overrides: dict[str, dict] = {}
         ai_provider = str(runtime.get("ai_provider") or settings.ai_provider or "openrouter").strip().lower()
         ai_enabled = (
             (ai_provider == "openrouter" and bool(runtime.get("openrouter_api_key")))
@@ -444,6 +740,12 @@ def process_document(db: Session, document_id: str, ocr_provider_name: str | Non
                 category_profiles=category_profiles,
                 preferred_category=doc.category,
             )
+            hint_confidence_overrides = _apply_extraction_hints(
+                db,
+                tenant_id=str(doc.tenant_id or ""),
+                category=str(metadata.get("category") or doc.category or "").strip() or None,
+                metadata=metadata,
+            )
             doc.ai_processed = True
         else:
             doc.ai_processed = False
@@ -472,6 +774,9 @@ def process_document(db: Session, document_id: str, ocr_provider_name: str | Non
             doc.paid = bool(metadata.get("paid"))
         if metadata.get("paid_on"):
             doc.paid_on = metadata.get("paid_on")
+        # Invariant: zodra een betaaldatum bestaat, is het document betaald.
+        if str(getattr(doc, "paid_on", "") or "").strip():
+            doc.paid = True
         if metadata.get("items") is not None:
             items = metadata.get("items")
             if isinstance(items, list):
@@ -598,6 +903,10 @@ def process_document(db: Session, document_id: str, ocr_provider_name: str | Non
 
         # Attach labels based on current OCR text + mapping rules (cheap, no LLM).
         _apply_bank_mapping_labels(db, doc=doc, ocr_text=ocr_text)
+        field_confidence = _build_field_confidence(doc, ocr_text)
+        if hint_confidence_overrides:
+            field_confidence.update(hint_confidence_overrides)
+        doc.field_confidence_json = json.dumps(field_confidence, ensure_ascii=False) if field_confidence else None
 
         label_text = " ".join([label.name for label in doc.labels])
         searchable = "\n".join(
@@ -625,6 +934,7 @@ def process_document(db: Session, document_id: str, ocr_provider_name: str | Non
 
         upsert_search_index(doc.id, searchable)
     except Exception as exc:
+        db.rollback()
         doc.status = "failed"
         doc.error_message = str(exc)
         db.commit()

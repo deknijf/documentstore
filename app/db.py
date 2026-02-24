@@ -65,9 +65,39 @@ def _apply_pending_migrations(conn) -> None:
     if current >= target:
         return
 
+    def _migration_v2(c) -> None:
+        # Document extraction confidence + training hints.
+        if not _column_exists(c, "documents", "field_confidence_json"):
+            c.execute(text("ALTER TABLE documents ADD COLUMN field_confidence_json TEXT"))
+        c.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS extraction_hints (
+                    tenant_id VARCHAR(36) NOT NULL,
+                    id VARCHAR(36) PRIMARY KEY,
+                    document_id VARCHAR(36) NOT NULL,
+                    field_key VARCHAR(64) NOT NULL,
+                    old_value TEXT,
+                    new_value TEXT,
+                    hint_kind VARCHAR(32) NOT NULL DEFAULT 'manual_correction',
+                    hint_text TEXT,
+                    category VARCHAR(120),
+                    created_by_user_id VARCHAR(36),
+                    created_at DATETIME NOT NULL
+                )
+                """
+            )
+        )
+        c.execute(text("CREATE INDEX IF NOT EXISTS ix_extraction_hints_tenant ON extraction_hints(tenant_id)"))
+        c.execute(text("CREATE INDEX IF NOT EXISTS ix_extraction_hints_document ON extraction_hints(document_id)"))
+        c.execute(text("CREATE INDEX IF NOT EXISTS ix_extraction_hints_field ON extraction_hints(field_key)"))
+        c.execute(text("CREATE INDEX IF NOT EXISTS ix_extraction_hints_user ON extraction_hints(created_by_user_id)"))
+        c.execute(text("CREATE INDEX IF NOT EXISTS ix_extraction_hints_created ON extraction_hints(created_at)"))
+
     # Future-proof: add explicit migration steps here.
     MIGRATIONS: dict[int, callable] = {
         # 1: baseline (introduced schema_migrations table)
+        2: _migration_v2,
     }
 
     for v in range(current + 1, target + 1):
@@ -235,12 +265,43 @@ def _ensure_document_columns() -> None:
             conn.execute(text("ALTER TABLE documents ADD COLUMN line_items TEXT"))
         if not _column_exists(conn, "documents", "extra_fields_json"):
             conn.execute(text("ALTER TABLE documents ADD COLUMN extra_fields_json TEXT"))
+        if not _column_exists(conn, "documents", "field_confidence_json"):
+            conn.execute(text("ALTER TABLE documents ADD COLUMN field_confidence_json TEXT"))
 
         # Indexes for dedupe detection
         if _column_exists(conn, "documents", "ocr_text_hash"):
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_documents_ocr_text_hash ON documents(ocr_text_hash)"))
         if _column_exists(conn, "documents", "duplicate_of_document_id"):
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_documents_duplicate_of ON documents(duplicate_of_document_id)"))
+
+
+def _ensure_extraction_hints_table() -> None:
+    with engine.begin() as conn:
+        _ensure_default_tenant(conn)
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS extraction_hints (
+                    tenant_id VARCHAR(36) NOT NULL,
+                    id VARCHAR(36) PRIMARY KEY,
+                    document_id VARCHAR(36) NOT NULL,
+                    field_key VARCHAR(64) NOT NULL,
+                    old_value TEXT,
+                    new_value TEXT,
+                    hint_kind VARCHAR(32) NOT NULL DEFAULT 'manual_correction',
+                    hint_text TEXT,
+                    category VARCHAR(120),
+                    created_by_user_id VARCHAR(36),
+                    created_at DATETIME NOT NULL
+                )
+                """
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_extraction_hints_tenant ON extraction_hints(tenant_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_extraction_hints_document ON extraction_hints(document_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_extraction_hints_field ON extraction_hints(field_key)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_extraction_hints_user ON extraction_hints(created_by_user_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_extraction_hints_created ON extraction_hints(created_at)"))
 
 
 def _ensure_user_columns() -> None:
@@ -829,6 +890,7 @@ def init_db() -> None:
         BankTransaction,
         CategoryCatalog,
         Document,
+        ExtractionHint,
         Group,
         MailIngestSeen,
         SavedView,
@@ -843,6 +905,7 @@ def init_db() -> None:
     _ensure_async_jobs_table()
     _ensure_bank_columns()
     _ensure_document_columns()
+    _ensure_extraction_hints_table()
     _ensure_category_catalog_columns()
     _ensure_category_prompt_templates()
     _ensure_integration_columns()

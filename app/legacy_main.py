@@ -9,6 +9,7 @@ import smtplib
 import ssl
 import secrets
 from pathlib import Path
+import ipaddress
 import re
 from threading import Lock, Thread, Event
 from urllib.parse import quote
@@ -40,6 +41,7 @@ from app.models import (
     BankTransaction,
     CategoryCatalog,
     Document,
+    ExtractionHint,
     Group,
     IntegrationSettings,
     Label,
@@ -102,6 +104,7 @@ from app.services.auth import (
 )
 from app.services.bank_budget_ai import analyze_budget_transactions_with_llm, match_document_payment_with_llm
 from app.services.file_service import allowed_avatar_content_type, allowed_content_type, ensure_dirs
+from app.services.document_conversion import convert_image_bytes_to_pdf, is_convertible_image_content_type
 from app.services.integration_settings import get_runtime_settings, settings_to_out, update_settings
 from app.services.bank_aggregator import BankAggregatorClient
 from app.services.bank_import import parse_imported_transactions
@@ -172,9 +175,23 @@ def _send_smtp_email(runtime: dict[str, str | None], recipient: str, subject: st
 def _split_csv_env(value: str) -> list[str]:
     return [p.strip() for p in (value or "").split(",") if p.strip()]
 
+def _expand_allowed_hosts_with_cidrs(hosts: list[str], cidrs_csv: str) -> list[str]:
+    expanded = list(hosts)
+    for raw in _split_csv_env(cidrs_csv):
+        try:
+            net = ipaddress.ip_network(raw, strict=False)
+        except ValueError:
+            continue
+        for ip in net.hosts():
+            expanded.append(str(ip))
+    return list(dict.fromkeys(expanded))
+
 
 # Limit allowed Host headers in production (prevents Host header attacks).
-allowed_hosts = _split_csv_env(settings.allowed_hosts)
+allowed_hosts = _expand_allowed_hosts_with_cidrs(
+    _split_csv_env(settings.allowed_hosts),
+    settings.allowed_host_cidrs,
+)
 if allowed_hosts:
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 
@@ -816,6 +833,29 @@ def document_to_out(doc: Document) -> dict:
                 extra_fields = {str(k): str(v) for k, v in loaded.items() if k and v is not None}
         except Exception:
             extra_fields = {}
+    field_confidence: dict[str, dict] = {}
+    if getattr(doc, "field_confidence_json", None):
+        try:
+            loaded = json.loads(doc.field_confidence_json)
+            if isinstance(loaded, dict):
+                for k, v in loaded.items():
+                    if not isinstance(v, dict):
+                        continue
+                    score = v.get("score")
+                    try:
+                        score = float(score)
+                    except Exception:
+                        score = None
+                    field_confidence[str(k)] = {
+                        "score": score if score is None else max(0.0, min(1.0, score)),
+                        "reason": str(v.get("reason", "") or "").strip(),
+                        "source": str(v.get("source", "") or "").strip(),
+                    }
+        except Exception:
+            field_confidence = {}
+    low_confidence_fields = [
+        k for k, v in field_confidence.items() if isinstance(v, dict) and isinstance(v.get("score"), (int, float)) and float(v["score"]) < 0.65
+    ]
     return {
         "id": doc.id,
         "filename": doc.filename,
@@ -850,6 +890,8 @@ def document_to_out(doc: Document) -> dict:
         "remark": doc.remark,
         "line_items": doc.line_items,
         "extra_fields": extra_fields,
+        "field_confidence": field_confidence,
+        "low_confidence_fields": low_confidence_fields,
         "ocr_text": doc.ocr_text,
         "ocr_processed": bool(doc.ocr_processed),
         "ai_processed": bool(doc.ai_processed),
@@ -4229,13 +4271,26 @@ async def upload_document(
             db.flush()
         auto_group_id = grp.id
 
-    ext = Path(file.filename or "document").suffix or ".bin"
+    data = await file.read()
+    content_sha256 = _document_content_sha256(data)
+    stored_data = data
+    stored_content_type = str(file.content_type or "")
+    stored_filename = file.filename or "document"
+
+    # For image uploads, try converting to PDF first.
+    # If conversion fails, keep the original upload bytes/type as-is.
+    if is_convertible_image_content_type(stored_content_type):
+        try:
+            stored_data = convert_image_bytes_to_pdf(data)
+            stored_content_type = "application/pdf"
+            stored_filename = f"{Path(stored_filename).stem}.pdf"
+        except Exception as exc:
+            log.warning("Image->PDF conversie mislukt voor %s: %s", stored_filename, exc)
+
+    ext = Path(stored_filename).suffix or (".pdf" if stored_content_type == "application/pdf" else ".bin")
     document_id = str(uuid.uuid4())
     storage_name = f"{document_id}{ext}"
     file_path = Path(settings.uploads_dir) / storage_name
-
-    data = await file.read()
-    content_sha256 = _document_content_sha256(data)
 
     duplicate = (
         db.query(Document)
@@ -4247,13 +4302,13 @@ async def upload_document(
         .order_by(Document.created_at.desc())
         .first()
     )
-    file_path.write_bytes(data)
+    file_path.write_bytes(stored_data)
 
     doc = Document(
         id=document_id,
         tenant_id=tenant_id,
-        filename=file.filename or storage_name,
-        content_type=file.content_type,
+        filename=stored_filename or storage_name,
+        content_type=stored_content_type,
         file_path=str(file_path),
         group_id=auto_group_id,
         uploaded_by_user_id=current_user.id,
@@ -4938,6 +4993,10 @@ def update_document(
             doc.budget_category = None
             doc.budget_category_source = None
 
+    # Invariant: zodra betaald_op ingevuld is, markeren we document als betaald.
+    if str(getattr(doc, "paid_on", "") or "").strip():
+        doc.paid = True
+
     doc.searchable_text = _build_searchable_text(doc)
     db.commit()
     db.refresh(doc)
@@ -4960,6 +5019,59 @@ def update_document(
         "labels": [str(l.id) for l in (doc.labels or [])],
     }
     changed = [k for k in before.keys() if before.get(k) != after.get(k)]
+    correction_fields = {
+        "subject",
+        "issuer",
+        "category",
+        "document_date",
+        "due_date",
+        "total_amount",
+        "currency",
+        "iban",
+        "structured_reference",
+        "paid",
+        "paid_on",
+        "line_items",
+    }
+    corrected = [k for k in changed if k in correction_fields]
+    if corrected:
+        try:
+            existing_conf: dict[str, dict] = {}
+            raw_conf = str(getattr(doc, "field_confidence_json", "") or "").strip()
+            if raw_conf:
+                loaded_conf = json.loads(raw_conf)
+                if isinstance(loaded_conf, dict):
+                    existing_conf = loaded_conf
+            for field in corrected:
+                old_val = before.get(field)
+                new_val = after.get(field)
+                old_s = "" if old_val is None else str(old_val)
+                new_s = "" if new_val is None else str(new_val)
+                if old_s == new_s:
+                    continue
+                hint = ExtractionHint(
+                    tenant_id=str(doc.tenant_id),
+                    id=str(uuid.uuid4()),
+                    document_id=str(doc.id),
+                    field_key=field,
+                    old_value=old_s or None,
+                    new_value=new_s or None,
+                    hint_kind="manual_correction",
+                    hint_text=f"Manual correction for {field}",
+                    category=str(doc.category or "").strip() or None,
+                    created_by_user_id=str(current_user.id),
+                )
+                db.add(hint)
+                existing_conf[field] = {
+                    "score": 1.0,
+                    "reason": "Handmatig bevestigd door gebruiker.",
+                    "source": "manual",
+                }
+            doc.field_confidence_json = json.dumps(existing_conf, ensure_ascii=False) if existing_conf else None
+            db.commit()
+            db.refresh(doc)
+        except Exception:
+            db.rollback()
     if changed:
         try:
             audit_log(
@@ -4974,6 +5086,82 @@ def update_document(
             db.commit()
         except Exception:
             db.rollback()
+    return document_to_out(doc)
+
+
+@app.post("/api/documents/{document_id}/confidence/confirm", response_model=DocumentOut)
+def confirm_document_field_confidence(
+    document_id: str,
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user_dep),
+):
+    doc = ensure_doc_access(db.get(Document, document_id), current_user)
+    field_key = str((payload or {}).get("field_key") or "").strip()
+    if not field_key:
+        raise HTTPException(status_code=400, detail="field_key is verplicht")
+
+    allowed_fields = {
+        "subject",
+        "issuer",
+        "document_date",
+        "due_date",
+        "total_amount",
+        "iban",
+        "structured_reference",
+        "paid_on",
+    }
+    if field_key not in allowed_fields:
+        raise HTTPException(status_code=400, detail="field_key niet ondersteund")
+
+    field_value = getattr(doc, field_key, None)
+    value_as_text = None if field_value is None else str(field_value)
+    if value_as_text is None or not value_as_text.strip():
+        raise HTTPException(status_code=400, detail="Leeg veld kan niet bevestigd worden")
+
+    existing_conf: dict[str, dict] = {}
+    raw_conf = str(getattr(doc, "field_confidence_json", "") or "").strip()
+    if raw_conf:
+        try:
+            loaded_conf = json.loads(raw_conf)
+            if isinstance(loaded_conf, dict):
+                existing_conf = loaded_conf
+        except Exception:
+            existing_conf = {}
+
+    existing_conf[field_key] = {
+        "score": 1.0,
+        "reason": "Handmatig bevestigd door gebruiker.",
+        "source": "manual",
+    }
+    doc.field_confidence_json = json.dumps(existing_conf, ensure_ascii=False)
+    hint = ExtractionHint(
+        tenant_id=str(doc.tenant_id),
+        id=str(uuid.uuid4()),
+        document_id=str(doc.id),
+        field_key=field_key,
+        old_value=value_as_text,
+        new_value=value_as_text,
+        hint_kind="manual_validation",
+        hint_text=f"Manual positive validation for {field_key}",
+        category=str(doc.category or "").strip() or None,
+        created_by_user_id=str(current_user.id),
+    )
+    db.add(hint)
+    try:
+        audit_log(
+            db,
+            tenant_id=_tenant_id_for_user(current_user),
+            user_id=str(current_user.id),
+            action="documents.field_confirm",
+            entity_type="document",
+            entity_id=str(doc.id),
+            details={"field": field_key},
+        )
+    except Exception:
+        pass
+    db.commit()
+    db.refresh(doc)
     return document_to_out(doc)
 
 
@@ -5065,7 +5253,8 @@ def download_original(
     current_user: User = Depends(get_current_user_dep),
 ):
     doc = ensure_doc_access(db.get(Document, document_id), current_user)
-    return FileResponse(doc.file_path, filename=doc.filename)
+    media_type = str(getattr(doc, "content_type", "") or "").strip() or None
+    return FileResponse(doc.file_path, filename=doc.filename, media_type=media_type)
 
 
 Path(settings.thumbnails_dir).mkdir(parents=True, exist_ok=True)

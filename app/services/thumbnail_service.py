@@ -16,7 +16,17 @@ class ThumbnailService:
 
     def _pdf_thumbnail(self, file_path: str, output_path: str) -> None:
         doc = fitz.open(file_path)
-        pix = doc.load_page(0).get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
+        page = doc.load_page(0)
+        rect = page.rect
+        w = max(1.0, float(rect.width))
+        h = max(1.0, float(rect.height))
+        # Keep rendered raster in a safe range for PIL decompression guard.
+        # Target ~12 MP max for thumbnail source rendering.
+        max_pixels = 12_000_000.0
+        base_scale = 1.5
+        scale = min(base_scale, (max_pixels / (w * h)) ** 0.5)
+        scale = max(0.15, scale)
+        pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale))
         doc.close()
         img = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
         img = self._normalize_thumbnail_orientation(img)
