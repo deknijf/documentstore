@@ -1,6 +1,7 @@
 services:
   documentstore:
     build: .
+    #image: deknijf/docstore:${GIT_TAG}
     container_name: documentstore
     ports:
       - "${HOST_PORT:-8000}:8000"

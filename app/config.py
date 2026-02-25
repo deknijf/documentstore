@@ -10,13 +10,16 @@ class Settings(BaseSettings):
     app_name: str = "Document Store"
     api_host: str = "0.0.0.0"
     api_port: int = 8000
+    # Single source of truth for release versioning.
+    # Example: 0.6.2
+    version: str = "0.6.2"
     # Public base URL (used for absolute links in emails, etc.)
     # Example: https://docstore.deknijf.eu
     public_base_url: str | None = None
     # App version metadata (stored in DB for upgrade tracking; typically equals the git tag without leading "v")
-    # Example: 0.6.1
-    app_version: str = "0.6.1"
-    # Optional git tag/commit metadata for diagnostics. Example: v0.6.1
+    # Example: ${VERSION}
+    app_version: str | None = None
+    # Optional git tag/commit metadata for diagnostics. Example: v0.6.2
     git_tag: str | None = None
 
     # Security / deployment
@@ -92,6 +95,26 @@ class Settings(BaseSettings):
     smtp_sender_email: str | None = None
     integration_master_key: str = "change-this-in-production"
     admin_default_password: str = "admin"
+
+    def model_post_init(self, __context) -> None:
+        # Support VERSION as a single source for APP_VERSION/GIT_TAG.
+        # This also covers cases where dotenv interpolation (${VERSION}) is not applied.
+        v = str(self.version or "").strip() or "0.0.0"
+
+        def _expand(value: str | None) -> str | None:
+            if value is None:
+                return None
+            text = str(value).strip()
+            if not text:
+                return None
+            return text.replace("${VERSION}", v)
+
+        resolved_app = _expand(self.app_version) or v
+        resolved_tag = _expand(self.git_tag) or f"v{v}"
+
+        self.version = v
+        self.app_version = resolved_app
+        self.git_tag = resolved_tag
 
 
 settings = Settings()
