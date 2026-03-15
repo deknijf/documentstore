@@ -94,10 +94,27 @@ def _apply_pending_migrations(conn) -> None:
         c.execute(text("CREATE INDEX IF NOT EXISTS ix_extraction_hints_user ON extraction_hints(created_by_user_id)"))
         c.execute(text("CREATE INDEX IF NOT EXISTS ix_extraction_hints_created ON extraction_hints(created_at)"))
 
+    def _migration_v3(c) -> None:
+        # Preserve original uploads and optional preprocessed representation.
+        if not _column_exists(c, "documents", "original_file_path"):
+            c.execute(text("ALTER TABLE documents ADD COLUMN original_file_path VARCHAR(500)"))
+            c.execute(text("UPDATE documents SET original_file_path = file_path WHERE original_file_path IS NULL"))
+        if not _column_exists(c, "documents", "original_content_type"):
+            c.execute(text("ALTER TABLE documents ADD COLUMN original_content_type VARCHAR(128)"))
+            c.execute(text("UPDATE documents SET original_content_type = content_type WHERE original_content_type IS NULL"))
+        if not _column_exists(c, "documents", "original_filename"):
+            c.execute(text("ALTER TABLE documents ADD COLUMN original_filename VARCHAR(255)"))
+            c.execute(text("UPDATE documents SET original_filename = filename WHERE original_filename IS NULL"))
+        if not _column_exists(c, "documents", "preprocessed_file_path"):
+            c.execute(text("ALTER TABLE documents ADD COLUMN preprocessed_file_path VARCHAR(500)"))
+        if not _column_exists(c, "documents", "preprocessed_content_type"):
+            c.execute(text("ALTER TABLE documents ADD COLUMN preprocessed_content_type VARCHAR(128)"))
+
     # Future-proof: add explicit migration steps here.
     MIGRATIONS: dict[int, callable] = {
         # 1: baseline (introduced schema_migrations table)
         2: _migration_v2,
+        3: _migration_v3,
     }
 
     for v in range(current + 1, target + 1):
@@ -191,6 +208,19 @@ def _ensure_document_columns() -> None:
             conn.execute(text("ALTER TABLE documents ADD COLUMN group_id VARCHAR(36)"))
         if not _column_exists(conn, "documents", "uploaded_by_user_id"):
             conn.execute(text("ALTER TABLE documents ADD COLUMN uploaded_by_user_id VARCHAR(36)"))
+        if not _column_exists(conn, "documents", "original_file_path"):
+            conn.execute(text("ALTER TABLE documents ADD COLUMN original_file_path VARCHAR(500)"))
+            conn.execute(text("UPDATE documents SET original_file_path = file_path WHERE original_file_path IS NULL"))
+        if not _column_exists(conn, "documents", "original_content_type"):
+            conn.execute(text("ALTER TABLE documents ADD COLUMN original_content_type VARCHAR(128)"))
+            conn.execute(text("UPDATE documents SET original_content_type = content_type WHERE original_content_type IS NULL"))
+        if not _column_exists(conn, "documents", "original_filename"):
+            conn.execute(text("ALTER TABLE documents ADD COLUMN original_filename VARCHAR(255)"))
+            conn.execute(text("UPDATE documents SET original_filename = filename WHERE original_filename IS NULL"))
+        if not _column_exists(conn, "documents", "preprocessed_file_path"):
+            conn.execute(text("ALTER TABLE documents ADD COLUMN preprocessed_file_path VARCHAR(500)"))
+        if not _column_exists(conn, "documents", "preprocessed_content_type"):
+            conn.execute(text("ALTER TABLE documents ADD COLUMN preprocessed_content_type VARCHAR(128)"))
         if not _column_exists(conn, "documents", "paid"):
             conn.execute(text("ALTER TABLE documents ADD COLUMN paid BOOLEAN DEFAULT 0"))
         if not _column_exists(conn, "documents", "paid_on"):

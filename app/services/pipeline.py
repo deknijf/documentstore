@@ -2,6 +2,7 @@ import json
 import hashlib
 import re
 import uuid
+from pathlib import Path
 from datetime import datetime
 from difflib import SequenceMatcher
 
@@ -13,6 +14,7 @@ from app.db import upsert_search_index
 from app.models import BankCategoryMapping, Document, CategoryCatalog, ExtractionHint, Group, Label
 from app.services.ai_extractor import get_ai_extractor
 from app.services.bank_budget_ai import _call_llm
+from app.services.doc_preprocess import ensure_preprocessed_document, original_source_for
 from app.services.integration_settings import get_runtime_settings
 from app.services.ocr.google_provider import GoogleOCRProvider
 from app.services.ocr.openai_provider import OpenAIOCRProvider
@@ -32,6 +34,38 @@ def _ocr_text_hash(text: str | None) -> str | None:
     if not norm:
         return None
     return hashlib.sha256(norm.encode("utf-8")).hexdigest()
+
+
+def _ocr_quality_score(text: str | None) -> float:
+    raw = str(text or "").strip()
+    if not raw:
+        return 0.0
+    compact = re.sub(r"\s+", " ", raw).strip()
+    lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+    words = re.findall(r"[A-Za-z0-9][A-Za-z0-9\-/\.,:]{1,}", compact)
+    letters = re.findall(r"[A-Za-zÀ-ÿ]", compact)
+    chars = len(compact)
+    line_count = len(lines)
+    word_count = len(words)
+    letter_ratio = (len(letters) / chars) if chars else 0.0
+
+    score = 0.0
+    # Enough signal in extracted text.
+    score += min(0.35, chars / 2400.0)
+    score += min(0.20, line_count / 28.0)
+    score += min(0.20, word_count / 220.0)
+    # OCR garbage often has too little alphabetic density.
+    if letter_ratio >= 0.45:
+        score += 0.18
+    elif letter_ratio >= 0.30:
+        score += 0.1
+    # Bonus for structured content patterns commonly present in invoices/bills.
+    if re.search(r"\b[A-Z]{2}[0-9]{2}[A-Z0-9]{8,}\b", compact):
+        score += 0.04
+    if re.search(r"\b\d{2}[/-]\d{2}[/-]\d{2,4}\b", compact):
+        score += 0.03
+
+    return round(min(1.0, score), 4)
 
 
 def _normalize_structured_reference(value: str | None) -> str | None:
@@ -652,11 +686,56 @@ def process_document(db: Session, document_id: str, ocr_provider_name: str | Non
         ocr_provider = _get_ocr_provider(ocr_provider_name or "", runtime)
         thumbnail_service = ThumbnailService()
 
+        process_path = str(doc.file_path or "").strip()
+        process_type = str(doc.content_type or "").strip()
+        if settings.doc_preprocess_enabled:
+            try:
+                process_path, process_type, used_preprocessed = ensure_preprocessed_document(doc, rebuild=bool(force))
+                if used_preprocessed and process_path:
+                    doc.preprocessed_file_path = process_path
+                if used_preprocessed and process_type:
+                    doc.preprocessed_content_type = process_type
+                if process_type == "application/pdf" and doc.filename and not str(doc.filename).lower().endswith(".pdf"):
+                    doc.filename = f"{Path(str(doc.filename)).stem}.pdf"
+            except Exception:
+                # Safe fallback: keep original active file.
+                process_path = str(doc.file_path or "").strip()
+                process_type = str(doc.content_type or "").strip()
+
+        # Keep thumbnail flow stable: always generate from original upload when available.
+        thumb_src_path, thumb_src_type = original_source_for(doc)
+        if not thumb_src_path:
+            thumb_src_path, thumb_src_type = process_path, process_type
         thumb_name = f"{doc.id}.jpg"
         thumb_fs_path = f"{settings.thumbnails_dir}/{thumb_name}"
-        thumbnail_service.create_thumbnail(doc.file_path, doc.content_type, thumb_fs_path)
+        thumbnail_service.create_thumbnail(thumb_src_path, thumb_src_type, thumb_fs_path)
 
-        ocr_text = ocr_provider.extract_text(doc.file_path, doc.content_type)
+        ocr_text = ocr_provider.extract_text(process_path, process_type)
+        # Default quality loop: prefer optimized OCR, but fallback to original OCR
+        # when optimized text quality is weak.
+        if (
+            settings.doc_preprocess_enabled
+            and settings.doc_preprocess_ocr_fallback_enabled
+            and process_path
+        ):
+            original_path, original_type = original_source_for(doc)
+            if (
+                original_path
+                and Path(str(original_path)).exists()
+                and str(original_path) != str(process_path)
+            ):
+                optimized_score = _ocr_quality_score(ocr_text)
+                min_quality = float(getattr(settings, "doc_preprocess_ocr_fallback_min_quality", 0.62) or 0.62)
+                min_gain = float(getattr(settings, "doc_preprocess_ocr_fallback_min_gain", 0.06) or 0.06)
+                if optimized_score < min_quality:
+                    try:
+                        original_ocr_text = ocr_provider.extract_text(str(original_path), str(original_type or process_type))
+                        original_score = _ocr_quality_score(original_ocr_text)
+                        if original_score >= (optimized_score + min_gain):
+                            ocr_text = original_ocr_text
+                    except Exception:
+                        # Keep optimized OCR result on any fallback extraction failure.
+                        pass
         doc.ocr_processed = True
         doc.ocr_text_hash = _ocr_text_hash(ocr_text)
 

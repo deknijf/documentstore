@@ -17,6 +17,8 @@ router.add_api_route("/api/admin/groups/{group_id}", legacy_main.delete_group, m
 router.add_api_route("/api/admin/integrations", legacy_main.get_integrations, methods=["GET"])
 router.add_api_route("/api/admin/integrations", legacy_main.update_integrations, methods=["PUT"])
 router.add_api_route("/api/admin/mail-ingest/run", legacy_main.run_mail_ingest, methods=["POST"])
+router.add_api_route("/api/admin/ops/summary", legacy_main.admin_ops_summary, methods=["GET"])
+router.add_api_route("/api/admin/ops/jobs/recover-stuck", legacy_main.admin_ops_recover_stuck_jobs, methods=["POST"])
 
 router.add_api_route("/api/admin/tenants", legacy_main.list_tenants, methods=["GET"])
 router.add_api_route("/api/admin/tenants", legacy_main.create_tenant, methods=["POST"])

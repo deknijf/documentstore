@@ -39,6 +39,10 @@ const bankMenuWrap = document.getElementById("bankMenuWrap");
 const menuBankApi = document.getElementById("menuBankApi");
 const auditRefreshBtn = document.getElementById("auditRefreshBtn");
 const auditList = document.getElementById("auditList");
+const opsSummary = document.getElementById("opsSummary");
+const opsStuckJobs = document.getElementById("opsStuckJobs");
+const opsRefreshBtn = document.getElementById("opsRefreshBtn");
+const opsRecoverBtn = document.getElementById("opsRecoverBtn");
 const clearFacetsBtn = document.getElementById("clearFacetsBtn");
 const facetToggleBtn = document.getElementById("facetToggleBtn");
 const facetLayout = document.getElementById("facetLayout");
@@ -78,6 +82,10 @@ const ocrAiBtn = document.getElementById("ocrAiBtn");
 
 const fileInput = document.getElementById("fileInput");
 const cameraInput = document.getElementById("cameraInput");
+const scanAssistBtn = document.getElementById("scanAssistBtn");
+const scanAssistModal = document.getElementById("scanAssistModal");
+const scanFairScanBtn = document.getElementById("scanFairScanBtn");
+const scanUseCameraBtn = document.getElementById("scanUseCameraBtn");
 const dropzone = document.getElementById("dropzone");
 const documentCards = document.getElementById("documentCards");
 const documentsPager = document.getElementById("documentsPager");
@@ -336,8 +344,12 @@ let budgetAnalysisMeta = null;
 let budgetAnalyzeProgressTimer = null;
 let analyzeJobPollTimer = null;
 let checkBankJobPollTimer = null;
+let serviceWorkerRegistration = null;
+let pendingSharedBatches = [];
+let sharedBatchImportInFlight = false;
 let savedViews = [];
 let auditLogs = [];
+let adminOps = null;
 const GROUPS_ENABLED = false;
 const detailLabelPills = document.getElementById("detailLabelPills");
 let selectedBudgetCategory = "";
@@ -789,6 +801,141 @@ async function authFetch(url, options = {}) {
   return res;
 }
 
+function canUseShareTargetPwa() {
+  return (
+    typeof navigator !== "undefined" &&
+    "serviceWorker" in navigator &&
+    (window.isSecureContext || ["localhost", "127.0.0.1"].includes(location.hostname))
+  );
+}
+
+function activeServiceWorker() {
+  return (
+    navigator.serviceWorker?.controller ||
+    serviceWorkerRegistration?.active ||
+    serviceWorkerRegistration?.waiting ||
+    serviceWorkerRegistration?.installing ||
+    null
+  );
+}
+
+function postToServiceWorker(message) {
+  const worker = activeServiceWorker();
+  if (worker) worker.postMessage(message);
+}
+
+function requestPendingSharedFiles() {
+  if (!canUseShareTargetPwa()) return;
+  postToServiceWorker({ type: "docstore-share-consume" });
+}
+
+function openScanAssistModal() {
+  if (scanAssistModal && typeof scanAssistModal.showModal === "function") {
+    scanAssistModal.showModal();
+  }
+}
+
+function closeScanAssistModal() {
+  if (scanAssistModal?.open) scanAssistModal.close();
+}
+
+function tryOpenFairScan() {
+  const fallbackUrl = "https://f-droid.org/packages/org.fairscan.app/";
+  const packageName = "org.fairscan.app";
+  if (!/android/i.test(navigator.userAgent || "")) {
+    window.open(fallbackUrl, "_blank", "noopener");
+    return;
+  }
+  closeScanAssistModal();
+  const fallback = encodeURIComponent(fallbackUrl);
+  // Best-effort Android intent. If FairScan is not installed, Chrome falls back to the install page.
+  window.location.href = `intent://scan/#Intent;package=${packageName};action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;S.browser_fallback_url=${fallback};end`;
+}
+
+function queuePendingSharedBatches(batches) {
+  const incoming = Array.isArray(batches) ? batches : [];
+  if (!incoming.length) return;
+  const existingIds = new Set(pendingSharedBatches.map((batch) => String(batch?.id || "")));
+  incoming.forEach((batch) => {
+    const batchId = String(batch?.id || "").trim();
+    const items = Array.isArray(batch?.items) ? batch.items.filter((file) => file instanceof File && file.size > 0) : [];
+    if (!batchId || !items.length || existingIds.has(batchId)) return;
+    pendingSharedBatches.push({
+      id: batchId,
+      created_at: Number(batch?.created_at || Date.now()),
+      items,
+    });
+    existingIds.add(batchId);
+  });
+  pendingSharedBatches.sort((a, b) => Number(a.created_at || 0) - Number(b.created_at || 0));
+  void importPendingSharedBatches();
+}
+
+async function importPendingSharedBatches() {
+  if (sharedBatchImportInFlight || !token || !pendingSharedBatches.length) return;
+  sharedBatchImportInFlight = true;
+  let importedCount = 0;
+  const completedBatchIds = [];
+  try {
+    while (pendingSharedBatches.length) {
+      const batch = pendingSharedBatches[0];
+      if (!batch?.id || !Array.isArray(batch.items) || !batch.items.length) {
+        pendingSharedBatches.shift();
+        continue;
+      }
+      for (const file of batch.items) {
+        await uploadFile(file, { refresh: false, showErrors: false });
+        importedCount += 1;
+      }
+      completedBatchIds.push(batch.id);
+      pendingSharedBatches.shift();
+    }
+    if (completedBatchIds.length) {
+      postToServiceWorker({ type: "docstore-share-ack", ids: completedBatchIds });
+      await loadDocs();
+      if (currentTabId() === "dashboard") renderDashboard();
+      if (currentTabId() === "documents") renderDocuments();
+      showToast(`${importedCount} gedeelde scan${importedCount === 1 ? "" : "s"} toegevoegd.`);
+    }
+  } catch (err) {
+    console.warn("Shared file import failed", err);
+    showToast("Gedeelde scan kon nog niet verwerkt worden.");
+  } finally {
+    sharedBatchImportInFlight = false;
+  }
+}
+
+async function registerShareTargetPwa() {
+  if (!canUseShareTargetPwa()) return;
+  try {
+    navigator.serviceWorker.addEventListener("message", (event) => {
+      const data = event?.data || {};
+      if (data.type === "docstore-share-available") {
+        requestPendingSharedFiles();
+        return;
+      }
+      if (data.type === "docstore-share-files") {
+        queuePendingSharedBatches(data.batches);
+      }
+    });
+    serviceWorkerRegistration = await navigator.serviceWorker.register("/service-worker.js", { scope: "/" });
+    await navigator.serviceWorker.ready;
+    if (navigator.serviceWorker.controller) {
+      requestPendingSharedFiles();
+    } else {
+      navigator.serviceWorker.addEventListener(
+        "controllerchange",
+        () => {
+          requestPendingSharedFiles();
+        },
+        { once: true },
+      );
+    }
+  } catch (err) {
+    console.warn("Service worker registration failed", err);
+  }
+}
+
 function setOptions(select, items, valueKey = "id", labelKey = "name", includeAll = false, allLabel = "Alle") {
   const head = includeAll ? `<option value="">${allLabel}</option>` : "";
   select.innerHTML =
@@ -873,6 +1020,20 @@ function formatDisplayDateTime(value) {
   const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})/);
   if (m) return `${m[3]}/${m[2]}/${m[1]} ${m[4]}:${m[5]}`;
   return formatDisplayDate(raw);
+}
+
+function formatBytes(value) {
+  const bytes = Number(value || 0);
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let size = bytes;
+  let idx = 0;
+  while (size >= 1024 && idx < units.length - 1) {
+    size /= 1024;
+    idx += 1;
+  }
+  const decimals = size >= 100 || idx === 0 ? 0 : 1;
+  return `${size.toFixed(decimals)} ${units[idx]}`;
 }
 
 function parseDateAsUtc(value) {
@@ -1069,6 +1230,7 @@ function setTab(tabId, { syncRoute = true, replaceRoute = false } = {}) {
 
 async function loadAudit() {
   if (!auditList) return;
+  await loadAdminOps();
   try {
     const r = await authFetch("/api/admin/audit?limit=500&offset=0");
     if (!r.ok) throw new Error("audit load failed");
@@ -1077,6 +1239,106 @@ async function loadAudit() {
     auditLogs = [];
   }
   renderAudit();
+}
+
+async function loadAdminOps() {
+  if (!opsSummary || !opsStuckJobs) return;
+  try {
+    const r = await authFetch("/api/admin/ops/summary");
+    if (!r.ok) throw new Error("ops summary load failed");
+    adminOps = await r.json();
+  } catch {
+    adminOps = null;
+  }
+  renderAdminOps();
+}
+
+function renderAdminOps() {
+  if (!opsSummary || !opsStuckJobs) return;
+  if (!adminOps || typeof adminOps !== "object") {
+    opsSummary.innerHTML = "<div class='panel'>Operations data niet beschikbaar.</div>";
+    opsStuckJobs.classList.add("hidden");
+    opsStuckJobs.innerHTML = "";
+    return;
+  }
+
+  const docs = adminOps.documents || {};
+  const storage = adminOps.storage || {};
+  const jobs = adminOps.jobs || {};
+  const stuckItems = Array.isArray(jobs.stuck_items) ? jobs.stuck_items : [];
+  const staleMinutes = Number(jobs.stale_minutes || 15);
+
+  opsSummary.innerHTML = `
+    <article class="ops-card">
+      <h4>Documenten</h4>
+      <div class="ops-stat">${Number(docs.total || 0)}</div>
+      <div class="ops-sub">optimized: ${Number(docs.with_preprocessed || 0)} · zonder: ${Number(docs.without_preprocessed || 0)}</div>
+    </article>
+    <article class="ops-card">
+      <h4>Opslag</h4>
+      <div class="ops-stat">${formatBytes(storage.preprocessed_bytes || 0)}</div>
+      <div class="ops-sub">orig: ${formatBytes(storage.original_bytes || 0)} · winst: ${formatBytes(storage.saving_bytes || 0)}</div>
+    </article>
+    <article class="ops-card">
+      <h4>Jobs</h4>
+      <div class="ops-stat">${Number(jobs.queued || 0)} / ${Number(jobs.running || 0)} / ${Number(jobs.failed || 0)}</div>
+      <div class="ops-sub">queued / running / failed · done: ${Number(jobs.done || 0)}</div>
+    </article>
+    <article class="ops-card">
+      <h4>Stuck jobs</h4>
+      <div class="ops-stat">${Number(jobs.stuck || 0)}</div>
+      <div class="ops-sub">ouder dan ${staleMinutes} min</div>
+    </article>
+  `;
+
+  if (!stuckItems.length) {
+    opsStuckJobs.classList.add("hidden");
+    opsStuckJobs.innerHTML = "";
+    return;
+  }
+
+  opsStuckJobs.innerHTML = stuckItems
+    .map((row) => {
+      const docId = String(row.document_id || "").trim();
+      const meta = [
+        row.status ? `status: ${escapeHtml(String(row.status))}` : "",
+        row.job_type ? `type: ${escapeHtml(String(row.job_type))}` : "",
+        Number.isFinite(Number(row.age_minutes)) ? `age: ${Number(row.age_minutes)} min` : "",
+        row.updated_at ? `update: ${escapeHtml(formatDisplayDateTime(row.updated_at))}` : "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      return `
+        <div class="ops-stuck-item">
+          <div class="ops-stuck-top">
+            <div class="ops-stuck-id">${escapeHtml(String(row.id || ""))}</div>
+            <div class="ops-stuck-age">${Number.isFinite(Number(row.age_minutes)) ? `${Number(row.age_minutes)} min` : "-"}</div>
+          </div>
+          <div class="ops-stuck-meta">${meta}</div>
+          ${docId ? `<div class="ops-stuck-meta">document: <code>${escapeHtml(docId)}</code></div>` : ""}
+          ${row.error ? `<div class="ops-stuck-meta">error: ${escapeHtml(String(row.error))}</div>` : ""}
+        </div>
+      `;
+    })
+    .join("");
+  opsStuckJobs.classList.remove("hidden");
+}
+
+async function recoverStuckJobs() {
+  if (!opsRecoverBtn) return;
+  if (!confirm("Stuck document jobs recoveren naar queue?")) return;
+  opsRecoverBtn.disabled = true;
+  try {
+    const r = await authFetch("/api/admin/ops/jobs/recover-stuck", { method: "POST" });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || "Recover mislukt");
+    showToast(`Recovered jobs: ${Number(data.recovered || 0)}`);
+    await loadAdminOps();
+  } catch (err) {
+    alert(err?.message || "Recover mislukt");
+  } finally {
+    opsRecoverBtn.disabled = false;
+  }
 }
 
 function renderAudit() {
@@ -3900,7 +4162,7 @@ async function loadIntegrations() {
   renderLlmProviderFields();
 }
 
-async function uploadFile(file) {
+async function uploadFile(file, { refresh = true, showErrors = true } = {}) {
   const form = new FormData();
   form.append("file", file);
   const res = await authFetch(`/api/documents`, {
@@ -3909,10 +4171,13 @@ async function uploadFile(file) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    return alert(err.detail || "Upload mislukt");
+    const message = err.detail || "Upload mislukt";
+    if (showErrors) alert(message);
+    throw new Error(message);
   }
-  await res.json().catch(() => ({}));
-  await loadDocs();
+  const payload = await res.json().catch(() => ({}));
+  if (refresh) await loadDocs();
+  return payload;
 }
 
 async function openDetails(docId, { syncRoute = true, replaceRoute = false } = {}) {
@@ -3974,19 +4239,25 @@ async function openDetails(docId, { syncRoute = true, replaceRoute = false } = {
   if (selectedId) dLabels.value = selectedId;
   detailOcrText.textContent = activeDoc.ocr_text || "Geen OCR tekst beschikbaar.";
   suppressAutoSave = false;
-  setViewerTab("original");
+  await setViewerTab("original");
   updateBulkButtons();
-
-  await renderDocumentViewer(activeDoc.id, activeDoc.content_type);
   if (syncRoute) updateHashRoute(routeForTab("document-detail"), { replace: replaceRoute });
 }
 
-function setViewerTab(tab) {
-  const isOriginal = tab === "original";
-  viewerTabOriginal.classList.toggle("active", isOriginal);
-  viewerTabOcr.classList.toggle("active", !isOriginal);
-  detailViewerWrap.classList.toggle("active", isOriginal);
-  detailOcrWrap.classList.toggle("active", !isOriginal);
+async function setViewerTab(tab) {
+  const mode = tab === "ocr" ? "ocr" : "original";
+  const isOcr = mode === "ocr";
+  const isOriginal = mode === "original";
+  viewerTabOriginal?.classList.toggle("active", isOriginal);
+  viewerTabOcr?.classList.toggle("active", isOcr);
+  detailViewerWrap.classList.toggle("active", !isOcr);
+  detailOcrWrap.classList.toggle("active", isOcr);
+
+  if (!isOcr && activeDoc?.id) {
+    const variant = "original";
+    const declaredType = String(activeDoc.original_content_type || activeDoc.content_type || "");
+    await renderDocumentViewer(activeDoc.id, declaredType, variant);
+  }
 }
 
 function updateImageZoomUI() {
@@ -4002,12 +4273,32 @@ function setImageZoom(next) {
   updateImageZoomUI();
 }
 
-async function renderDocumentViewer(docId, contentType) {
+async function renderDocumentViewer(docId, contentType, variant = "viewer") {
   if (viewerObjectUrl) {
     URL.revokeObjectURL(viewerObjectUrl);
     viewerObjectUrl = "";
   }
-  const res = await authFetch(`/files/${docId}`);
+  const safeVariant = variant === "original" ? "original" : "viewer";
+  const accessToken = String(token || "").trim();
+  const directViewerUrl = `/files/${docId}?variant=${encodeURIComponent(safeVariant)}${
+    accessToken ? `&access_token=${encodeURIComponent(accessToken)}` : ""
+  }&ts=${Date.now()}`;
+  const declaredType = String(contentType || "").toLowerCase();
+  const isPdf = declaredType.includes("pdf");
+  const isImage = !isPdf && declaredType.startsWith("image/");
+
+  if (isPdf) {
+    detailViewerWrap.innerHTML = `
+      <div class="pdf-viewer-toolbar">
+        <a class="ghost pdf-viewer-link" href="${directViewerUrl}" target="_blank" rel="noopener">Open</a>
+        <a class="ghost pdf-viewer-link" href="${directViewerUrl}" download>Download</a>
+      </div>
+      <iframe src="${directViewerUrl}#page=1&zoom=page-fit" title="Document viewer"></iframe>
+    `;
+    return;
+  }
+
+  const res = await authFetch(directViewerUrl);
   if (!res.ok) {
     detailViewerWrap.innerHTML = "<p>Kon document niet laden.</p>";
     return;
@@ -4016,17 +4307,12 @@ async function renderDocumentViewer(docId, contentType) {
   viewerObjectUrl = URL.createObjectURL(blob);
   const responseType = String(res.headers.get("content-type") || "").toLowerCase();
   const blobType = String(blob.type || "").toLowerCase();
-  const declaredType = String(contentType || "").toLowerCase();
-  const isPdf =
-    declaredType.includes("pdf") ||
-    responseType.includes("application/pdf") ||
-    blobType.includes("application/pdf");
-  const isImage =
-    (!isPdf && declaredType.startsWith("image/")) ||
-    (!isPdf && responseType.startsWith("image/")) ||
-    (!isPdf && blobType.startsWith("image/"));
+  const resolvedIsImage =
+    isImage ||
+    responseType.startsWith("image/") ||
+    blobType.startsWith("image/");
 
-  if (isImage) {
+  if (resolvedIsImage) {
     imageZoomLevel = 1;
     detailViewerWrap.innerHTML = `
       <div class="image-zoom-toolbar">
@@ -4056,10 +4342,6 @@ async function renderDocumentViewer(docId, contentType) {
       { passive: false },
     );
     updateImageZoomUI();
-    return;
-  }
-  if (isPdf) {
-    detailViewerWrap.innerHTML = `<iframe src="${viewerObjectUrl}#page=1&zoom=page-fit" title="Document viewer"></iframe>`;
     return;
   }
   detailViewerWrap.innerHTML = `<iframe src="${viewerObjectUrl}" title="Document viewer"></iframe>`;
@@ -4728,6 +5010,8 @@ async function bootstrap() {
   await loadLabels();
   await loadProviders();
   await loadDocs();
+  requestPendingSharedFiles();
+  await importPendingSharedBatches();
 
   if (isAdminUser) {
     await loadAdminUsers();
@@ -4917,6 +5201,12 @@ if (viewsList) {
 if (auditRefreshBtn) {
   auditRefreshBtn.addEventListener("click", () => void loadAudit());
 }
+if (opsRefreshBtn) {
+  opsRefreshBtn.addEventListener("click", () => void loadAdminOps());
+}
+if (opsRecoverBtn) {
+  opsRecoverBtn.addEventListener("click", () => void recoverStuckJobs());
+}
 
 if (mastHomeLink) {
   mastHomeLink.addEventListener("click", (e) => {
@@ -4977,6 +5267,16 @@ switchFromResetToLoginLink?.addEventListener("click", () => {
 logoutBtn.addEventListener("click", logout);
 mobileMenuBtn.addEventListener("click", toggleMobileNav);
 mobileNavBackdrop.addEventListener("click", closeMobileNav);
+scanAssistBtn?.addEventListener("click", () => {
+  openScanAssistModal();
+});
+scanFairScanBtn?.addEventListener("click", () => {
+  tryOpenFairScan();
+});
+scanUseCameraBtn?.addEventListener("click", () => {
+  closeScanAssistModal();
+  cameraInput?.click();
+});
 window.addEventListener("resize", () => {
   if (!isMobileLayout()) closeMobileNav();
   if (currentTabId() === "document-detail") {
@@ -5282,8 +5582,12 @@ detailBackBtn.addEventListener("click", () => setTab("dashboard"));
 detailDownloadBtn.addEventListener("click", () => {
   if (activeDoc?.id) fetchFileWithAuth(activeDoc.id, true, activeDoc.filename || "");
 });
-viewerTabOriginal.addEventListener("click", () => setViewerTab("original"));
-viewerTabOcr.addEventListener("click", () => setViewerTab("ocr"));
+viewerTabOriginal?.addEventListener("click", () => {
+  void setViewerTab("original");
+});
+viewerTabOcr?.addEventListener("click", () => {
+  void setViewerTab("ocr");
+});
 detailConfidenceToggleBtn?.addEventListener("click", () => {
   detailConfidenceCollapsed = !detailConfidenceCollapsed;
   applyDetailConfidenceCollapse();
@@ -5725,4 +6029,5 @@ checkBankBtn?.addEventListener("click", () => {
   void checkBankPaymentsForDocuments();
 });
 
+void registerShareTargetPwa();
 bootstrap();

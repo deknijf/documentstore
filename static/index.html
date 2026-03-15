@@ -6,14 +6,14 @@
     <meta name="theme-color" content="#1E4A8B" />
     <meta name="mobile-web-app-capable" content="yes" />
     <title>Document Store</title>
-    <link rel="manifest" href="/manifest.webmanifest?v=20260224a" />
+    <link rel="manifest" href="/manifest.webmanifest?v=20260315a" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=20260224a" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-round-32.png?v=20260224b" />
     <link rel="icon" type="image/x-icon" href="/favicon-round.ico?v=20260224b" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/styles.css?v=20260219k" />
+    <link rel="stylesheet" href="/styles.css?v=20260315b" />
   </head>
   <body>
     <svg
@@ -372,7 +372,7 @@
             </aside>
             <section class="detail-viewer">
               <div class="viewer-tabs">
-                <button id="viewerTabOriginal" class="viewer-tab active" type="button">Origineel document</button>
+                <button id="viewerTabOriginal" class="viewer-tab active" type="button">Document</button>
                 <button id="viewerTabOcr" class="viewer-tab" type="button">OCR tekst</button>
               </div>
               <div id="detailViewerWrap" class="viewer-wrap viewer-pane active">
@@ -391,9 +391,12 @@
             <div class="upload-row upload-row-docs-simple">
               <div id="dropzone" class="dropzone inline-dropzone">Sleep PDF of afbeelding(en) hierheen</div>
               <label class="file-btn btn-action" for="fileInput">Bestanden kiezen</label>
-              <label class="file-btn btn-action mobile-only" for="cameraInput">Maak foto</label>
+              <button id="scanAssistBtn" class="file-btn btn-action mobile-only" type="button">Scan document</button>
               <input id="fileInput" type="file" accept="application/pdf,image/*" multiple hidden />
               <input id="cameraInput" type="file" accept="image/*" capture="environment" hidden />
+            </div>
+            <div class="mobile-scan-hint mobile-only">
+              Tip: gebruik op Android bij voorkeur een scanner-app en deel de scan-PDF daarna naar Docstore.
             </div>
           </div>
           <div id="documentCards" class="cards"></div>
@@ -953,6 +956,17 @@
         <section id="tab-admin-audit" class="tab-panel">
           <div class="panel">
             <div class="panel-head">
+              <h2>Operations</h2>
+              <div class="inline-actions">
+                <button id="opsRecoverBtn" class="ghost btn-action" type="button">Recover stuck jobs</button>
+                <button id="opsRefreshBtn" class="icon-refresh" aria-label="Vernieuwen" title="Vernieuwen">↻</button>
+              </div>
+            </div>
+            <div id="opsSummary" class="ops-summary"></div>
+            <div id="opsStuckJobs" class="ops-stuck-list hidden"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-head">
               <h2>Audit logs</h2>
               <button id="auditRefreshBtn" class="icon-refresh" aria-label="Vernieuwen" title="Vernieuwen">↻</button>
             </div>
@@ -979,6 +993,46 @@
       </form>
     </dialog>
 
-    <script src="/app.js?v=20260221v2" type="module"></script>
+    <dialog id="scanAssistModal" class="scan-assist-modal">
+      <form method="dialog" class="scan-assist-inner">
+        <div class="scan-assist-head">
+          <h3>Scan document</h3>
+          <button id="scanAssistClose" class="ghost btn-action" value="cancel" type="submit">Sluiten</button>
+        </div>
+        <p class="scan-assist-copy">
+          Voor de beste kwaliteit op Android: scan eerst als PDF in een scanner-app en deel daarna het resultaat naar de geïnstalleerde Docstore-app.
+        </p>
+        <div class="scan-assist-grid">
+          <section class="scan-assist-card">
+            <h4>Aanbevolen</h4>
+            <p>FairScan maakt nette PDF-scans met automatische crop, perspectiefcorrectie en enhancement.</p>
+            <div class="scan-assist-actions">
+              <button
+                id="scanFairScanBtn"
+                class="file-btn btn-action"
+                type="button"
+              >
+                Open FairScan
+              </button>
+            </div>
+          </section>
+          <section class="scan-assist-card">
+            <h4>Fallback</h4>
+            <p>Als je geen scanner-app wil gebruiken, kan je nog altijd een gewone foto nemen. Dat geeft meestal zwakkere OCR-resultaten.</p>
+            <div class="scan-assist-actions">
+              <button id="scanUseCameraBtn" class="ghost btn-action" type="button">Gebruik camera</button>
+            </div>
+          </section>
+        </div>
+        <ol class="scan-assist-steps">
+          <li>Installeer Docstore als app op je telefoon.</li>
+          <li>Scan je document in FairScan.</li>
+          <li>Kies daar <strong>Delen</strong> en selecteer <strong>Docstore</strong>.</li>
+          <li>Docstore importeert daarna de scan automatisch als document.</li>
+        </ol>
+      </form>
+    </dialog>
+
+    <script src="/app.js?v=20260315b" type="module"></script>
   </body>
 </html>

@@ -7,6 +7,9 @@ class DocumentOut(BaseModel):
     id: str
     filename: str
     content_type: str
+    has_preprocessed: bool = False
+    original_content_type: str | None = None
+    preprocessed_content_type: str | None = None
     thumbnail_path: str | None
     group_id: str | None
     status: str

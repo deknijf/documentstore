@@ -11,15 +11,15 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     # Single source of truth for release versioning.
-    # Example: 0.6.2
-    version: str = "0.6.2"
+    # Example: 0.6.3
+    version: str = "0.6.3"
     # Public base URL (used for absolute links in emails, etc.)
     # Example: https://docstore.deknijf.eu
     public_base_url: str | None = None
     # App version metadata (stored in DB for upgrade tracking; typically equals the git tag without leading "v")
     # Example: ${VERSION}
     app_version: str | None = None
-    # Optional git tag/commit metadata for diagnostics. Example: v0.6.2
+    # Optional git tag/commit metadata for diagnostics. Example: v0.6.3
     git_tag: str | None = None
 
     # Security / deployment
@@ -42,9 +42,31 @@ class Settings(BaseSettings):
 
     data_dir: str = "data"
     uploads_dir: str = "data/uploads"
+    preprocessed_dir: str = "data/preprocessed"
     thumbnails_dir: str = "data/thumbnails"
     avatars_dir: str = "data/avatars"
     sqlite_path: str = "data/documentstore.db"
+    # When enabled, image uploads are preprocessed to PDF for better OCR/thumbnail quality.
+    # Original uploads are always preserved.
+    doc_preprocess_enabled: bool = True
+    # Optional OpenCV-based scan pipeline (perspective correction, deskew, cleanup).
+    # If OpenCV is unavailable, processing safely falls back to the PIL-only pipeline.
+    doc_preprocess_opencv_enabled: bool = True
+    doc_preprocess_pdf_enabled: bool = True
+    doc_preprocess_perspective_enabled: bool = True
+    doc_preprocess_deskew_enabled: bool = True
+    doc_preprocess_enhance_enabled: bool = True
+    # Output size/quality controls to keep optimized PDFs compact.
+    # Keep high enough for OCR readability while reducing storage/parsing cost.
+    doc_preprocess_output_max_dim: int = 2400
+    doc_preprocess_output_jpeg_quality: int = 82
+    # OCR quality guard: when optimized OCR text looks weak, run OCR on original
+    # and keep the better result for AI parsing/search/confidence.
+    doc_preprocess_ocr_fallback_enabled: bool = True
+    # Minimum quality score (0..1) expected from optimized OCR before fallback check.
+    doc_preprocess_ocr_fallback_min_quality: float = 0.62
+    # Minimum gain required for replacing optimized OCR text with original OCR text.
+    doc_preprocess_ocr_fallback_min_gain: float = 0.06
 
     ocr_provider: str = "textract"
     ai_provider: str = "openrouter"

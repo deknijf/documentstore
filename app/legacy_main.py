@@ -15,11 +15,10 @@ from threading import Lock, Thread, Event
 from urllib.parse import quote
 from email.message import EmailMessage
 
-from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Query, UploadFile, Header, Request
+from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
-from starlette.middleware.trustedhost import TrustedHostMiddleware
 from sqlalchemy import text, func, or_, and_
 from sqlalchemy.orm import Session
 
@@ -91,6 +90,7 @@ from app.services.auth import (
     ROLE_SUPERADMIN,
     ROLE_USER,
     extract_bearer_token,
+    get_current_user,
     group_to_out,
     issue_token,
     require_admin_access,
@@ -104,7 +104,6 @@ from app.services.auth import (
 )
 from app.services.bank_budget_ai import analyze_budget_transactions_with_llm, match_document_payment_with_llm
 from app.services.file_service import allowed_avatar_content_type, allowed_content_type, ensure_dirs
-from app.services.document_conversion import convert_image_bytes_to_pdf, is_convertible_image_content_type
 from app.services.integration_settings import get_runtime_settings, settings_to_out, update_settings
 from app.services.bank_aggregator import BankAggregatorClient
 from app.services.bank_import import parse_imported_transactions
@@ -123,6 +122,8 @@ MAIL_INGEST_RUN_LOCK = Lock()
 MAIL_INGEST_LAST_RUN_AT: dict[str, datetime] = {}
 MAIL_INGEST_STOP_EVENT = Event()
 MAIL_INGEST_THREAD: Thread | None = None
+DOCUMENT_JOB_STOP_EVENT = Event()
+DOCUMENT_JOB_THREAD: Thread | None = None
 GROUPS_ENABLED = False
 
 
@@ -175,25 +176,62 @@ def _send_smtp_email(runtime: dict[str, str | None], recipient: str, subject: st
 def _split_csv_env(value: str) -> list[str]:
     return [p.strip() for p in (value or "").split(",") if p.strip()]
 
-def _expand_allowed_hosts_with_cidrs(hosts: list[str], cidrs_csv: str) -> list[str]:
-    expanded = list(hosts)
+def _parse_allowed_cidrs(cidrs_csv: str) -> list[ipaddress._BaseNetwork]:
+    nets: list[ipaddress._BaseNetwork] = []
     for raw in _split_csv_env(cidrs_csv):
         try:
-            net = ipaddress.ip_network(raw, strict=False)
+            nets.append(ipaddress.ip_network(raw, strict=False))
         except ValueError:
             continue
-        for ip in net.hosts():
-            expanded.append(str(ip))
-    return list(dict.fromkeys(expanded))
+    return nets
+
+
+def _host_without_port(host_header: str) -> str:
+    host = str(host_header or "").strip()
+    if not host:
+        return ""
+    if host.startswith("["):
+        end = host.find("]")
+        if end > 0:
+            return host[1:end]
+    if ":" in host:
+        return host.split(":", 1)[0]
+    return host
+
+
+def _host_matches_allowlist(host: str, allow_hosts: list[str], allow_nets: list[ipaddress._BaseNetwork]) -> bool:
+    h = str(host or "").strip().lower()
+    if not h:
+        return False
+    for raw in allow_hosts:
+        pattern = str(raw or "").strip().lower()
+        if not pattern:
+            continue
+        if pattern == "*":
+            return True
+        if pattern.startswith("*."):
+            suffix = pattern[1:]
+            if h.endswith(suffix):
+                return True
+        elif h == pattern:
+            return True
+    try:
+        ip = ipaddress.ip_address(h)
+    except ValueError:
+        return False
+    return any(ip in net for net in allow_nets)
 
 
 # Limit allowed Host headers in production (prevents Host header attacks).
-allowed_hosts = _expand_allowed_hosts_with_cidrs(
-    _split_csv_env(settings.allowed_hosts),
-    settings.allowed_host_cidrs,
-)
-if allowed_hosts:
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
+allowed_hosts = _split_csv_env(settings.allowed_hosts)
+allowed_host_nets = _parse_allowed_cidrs(settings.allowed_host_cidrs)
+if allowed_hosts or allowed_host_nets:
+    @app.middleware("http")
+    async def enforce_allowed_hosts(request: Request, call_next):
+        host = _host_without_port(request.headers.get("host", ""))
+        if not _host_matches_allowlist(host, allowed_hosts, allowed_host_nets):
+            return PlainTextResponse("Invalid host header", status_code=400)
+        return await call_next(request)
 
 # CORS: Only needed when frontend is served from a different origin.
 cors_origins = _split_csv_env(settings.cors_allow_origins)
@@ -338,10 +376,24 @@ def _startup_guardrails_and_cleanup(db: Session) -> None:
         if str(settings.integration_master_key or "").strip() in {"", "change-this-in-production"}:
             raise RuntimeError("INTEGRATION_MASTER_KEY moet aangepast worden in productie")
 
-    # If the process restarted, any in-process jobs are lost. Mark 'running' jobs as failed
-    # so the UI doesn't show them as stuck forever.
+    # If the process restarted, in-process jobs are lost.
+    # Resume document processing jobs from queue; fail all other running jobs.
     try:
-        db.query(AsyncJob).filter(AsyncJob.status == "running").update(
+        db.query(AsyncJob).filter(
+            AsyncJob.status == "running",
+            AsyncJob.job_type == "document-process",
+        ).update(
+            {
+                AsyncJob.status: "queued",
+                AsyncJob.error: "Server restart: queued for resume",
+                AsyncJob.started_at: None,
+            },
+            synchronize_session=False,
+        )
+        db.query(AsyncJob).filter(
+            AsyncJob.status == "running",
+            AsyncJob.job_type != "document-process",
+        ).update(
             {
                 AsyncJob.status: "failed",
                 AsyncJob.error: "Server restart: job interrupted",
@@ -360,6 +412,102 @@ def process_document_job(document_id: str, ocr_provider: str | None = None, forc
         process_document(db, document_id, ocr_provider, force=force)
     finally:
         db.close()
+
+
+def _enqueue_document_process_job(
+    db: Session,
+    *,
+    tenant_id: str,
+    user_id: str,
+    document_id: str,
+    ocr_provider: str | None,
+    force: bool,
+) -> str:
+    payload = {
+        "document_id": str(document_id),
+        "ocr_provider": (str(ocr_provider).strip() or None),
+        "force": bool(force),
+    }
+    row = AsyncJob(
+        tenant_id=str(tenant_id),
+        job_type="document-process",
+        status="queued",
+        user_id=str(user_id),
+        processed=0,
+        total=1,
+        result_json=json.dumps(payload, ensure_ascii=True),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return str(row.id)
+
+
+def _document_job_loop() -> None:
+    while not DOCUMENT_JOB_STOP_EVENT.is_set():
+        db = SessionLocal()
+        try:
+            row = (
+                db.query(AsyncJob)
+                .filter(AsyncJob.job_type == "document-process", AsyncJob.status == "queued")
+                .order_by(AsyncJob.created_at.asc())
+                .first()
+            )
+            if not row:
+                DOCUMENT_JOB_STOP_EVENT.wait(1.0)
+                continue
+            row.status = "running"
+            row.started_at = datetime.utcnow()
+            row.error = None
+            row.updated_at = datetime.utcnow()
+            db.commit()
+            job_id = str(row.id)
+            payload = {}
+            try:
+                payload = json.loads(row.result_json or "{}") if row.result_json else {}
+            except Exception:
+                payload = {}
+        finally:
+            db.close()
+
+        try:
+            doc_id = str(payload.get("document_id") or "").strip()
+            if not doc_id:
+                raise RuntimeError("document_id ontbreekt in job payload")
+            process_document_job(
+                doc_id,
+                (str(payload.get("ocr_provider") or "").strip() or None),
+                bool(payload.get("force", False)),
+            )
+            db_done = SessionLocal()
+            try:
+                _update_async_job_db(
+                    db_done,
+                    job_id,
+                    status="done",
+                    processed=1,
+                    total=1,
+                    finished_at=datetime.utcnow(),
+                    result={**payload, "ok": True},
+                )
+            finally:
+                db_done.close()
+        except Exception as ex:
+            log.exception("document-process job failed: %s", job_id)
+            db_fail = SessionLocal()
+            try:
+                _update_async_job_db(
+                    db_fail,
+                    job_id,
+                    status="failed",
+                    processed=0,
+                    total=1,
+                    finished_at=datetime.utcnow(),
+                    error=f"{type(ex).__name__}: {ex}",
+                    result={**payload, "traceback": traceback.format_exc(limit=12)},
+                )
+            finally:
+                db_fail.close()
 
 
 def _start_async_job(job_id: str, worker) -> None:
@@ -856,10 +1004,15 @@ def document_to_out(doc: Document) -> dict:
     low_confidence_fields = [
         k for k, v in field_confidence.items() if isinstance(v, dict) and isinstance(v.get("score"), (int, float)) and float(v["score"]) < 0.65
     ]
+    preprocessed_path = str(getattr(doc, "preprocessed_file_path", "") or "").strip()
+    has_preprocessed = bool(preprocessed_path and Path(preprocessed_path).exists())
     return {
         "id": doc.id,
         "filename": doc.filename,
         "content_type": doc.content_type,
+        "has_preprocessed": has_preprocessed,
+        "original_content_type": getattr(doc, "original_content_type", None),
+        "preprocessed_content_type": getattr(doc, "preprocessed_content_type", None),
         "thumbnail_path": doc.thumbnail_path,
         "group_id": doc.group_id,
         "status": doc.status,
@@ -1904,6 +2057,16 @@ def _purge_expired_deleted_docs(db: Session, tenant_id: str) -> None:
         except Exception:
             pass
         try:
+            if getattr(d, "original_file_path", None):
+                Path(str(d.original_file_path)).unlink(missing_ok=True)
+        except Exception:
+            pass
+        try:
+            if getattr(d, "preprocessed_file_path", None):
+                Path(str(d.preprocessed_file_path)).unlink(missing_ok=True)
+        except Exception:
+            pass
+        try:
             if d.thumbnail_path:
                 thumb = d.thumbnail_path.replace("/thumbnails/", "").strip()
                 if thumb:
@@ -1951,7 +2114,7 @@ def _build_searchable_text(doc: Document) -> str:
 
 @app.on_event("startup")
 def startup() -> None:
-    global MAIL_INGEST_THREAD
+    global MAIL_INGEST_THREAD, DOCUMENT_JOB_THREAD
     ensure_dirs()
     init_db()
     ensure_bootstrap_admin()
@@ -1962,6 +2125,10 @@ def startup() -> None:
     finally:
         db.close()
     rebuild_search_index_for_all_documents()
+    if DOCUMENT_JOB_THREAD is None or not DOCUMENT_JOB_THREAD.is_alive():
+        DOCUMENT_JOB_STOP_EVENT.clear()
+        DOCUMENT_JOB_THREAD = Thread(target=_document_job_loop, daemon=True, name="document-job-loop")
+        DOCUMENT_JOB_THREAD.start()
     if MAIL_INGEST_THREAD is None or not MAIL_INGEST_THREAD.is_alive():
         MAIL_INGEST_STOP_EVENT.clear()
         MAIL_INGEST_THREAD = Thread(target=_mail_ingest_loop, daemon=True, name="mail-ingest-loop")
@@ -1970,6 +2137,7 @@ def startup() -> None:
 
 @app.on_event("shutdown")
 def shutdown() -> None:
+    DOCUMENT_JOB_STOP_EVENT.set()
     MAIL_INGEST_STOP_EVENT.set()
 
 
@@ -2996,6 +3164,152 @@ def run_mail_ingest(
         "skipped_seen": int(result.get("skipped_seen") or 0),
         "scanned_messages": int(result.get("scanned_messages") or 0),
     }
+
+
+@app.get("/api/admin/ops/summary")
+def admin_ops_summary(
+    stale_minutes: int = Query(default=15, ge=1, le=1440),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user_dep),
+):
+    require_admin_access(current_user)
+    tenant_id = _tenant_id_for_user(current_user)
+
+    docs = db.query(Document).filter(Document.tenant_id == tenant_id, Document.deleted_at.is_(None)).all()
+    total_docs = len(docs)
+    with_preprocessed = 0
+    preprocessed_bytes = 0
+    original_bytes = 0
+    for d in docs:
+        pre = str(getattr(d, "preprocessed_file_path", "") or "").strip()
+        if pre:
+            p = Path(pre)
+            if p.exists():
+                with_preprocessed += 1
+                try:
+                    preprocessed_bytes += int(p.stat().st_size or 0)
+                except Exception:
+                    pass
+        src = str(getattr(d, "original_file_path", "") or getattr(d, "file_path", "") or "").strip()
+        if src:
+            p = Path(src)
+            if p.exists():
+                try:
+                    original_bytes += int(p.stat().st_size or 0)
+                except Exception:
+                    pass
+
+    rows = db.query(AsyncJob).filter(AsyncJob.tenant_id == tenant_id).all()
+    queued = sum(1 for r in rows if str(r.status) == "queued")
+    running = sum(1 for r in rows if str(r.status) == "running")
+    failed = sum(1 for r in rows if str(r.status) == "failed")
+    done = sum(1 for r in rows if str(r.status) == "done")
+
+    now = datetime.utcnow()
+    cutoff = now - timedelta(minutes=int(stale_minutes))
+    stuck_rows = [
+        r
+        for r in rows
+        if str(r.job_type) == "document-process"
+        and str(r.status) in {"queued", "running"}
+        and (
+            (r.updated_at and r.updated_at < cutoff)
+            or (r.started_at and r.started_at < cutoff and str(r.status) == "running")
+            or (not r.updated_at and r.created_at and r.created_at < cutoff)
+        )
+    ]
+    stuck_rows = sorted(stuck_rows, key=lambda x: x.created_at or datetime.utcnow())
+    stuck: list[dict] = []
+    for r in stuck_rows[:200]:
+        payload = {}
+        try:
+            payload = json.loads(r.result_json or "{}") if r.result_json else {}
+        except Exception:
+            payload = {}
+        age = None
+        ref_dt = r.updated_at or r.started_at or r.created_at
+        if ref_dt:
+            age = max(0, int((now - ref_dt).total_seconds() // 60))
+        stuck.append(
+            {
+                "id": str(r.id),
+                "status": str(r.status),
+                "job_type": str(r.job_type),
+                "document_id": str(payload.get("document_id") or ""),
+                "force": bool(payload.get("force", False)),
+                "age_minutes": age,
+                "error": str(r.error or ""),
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+            }
+        )
+
+    return {
+        "documents": {
+            "total": total_docs,
+            "with_preprocessed": with_preprocessed,
+            "without_preprocessed": max(0, total_docs - with_preprocessed),
+        },
+        "storage": {
+            "original_bytes": original_bytes,
+            "preprocessed_bytes": preprocessed_bytes,
+            "saving_bytes": max(0, original_bytes - preprocessed_bytes),
+        },
+        "jobs": {
+            "queued": queued,
+            "running": running,
+            "failed": failed,
+            "done": done,
+            "stuck": len(stuck),
+            "stale_minutes": int(stale_minutes),
+            "stuck_items": stuck,
+        },
+    }
+
+
+@app.post("/api/admin/ops/jobs/recover-stuck")
+def admin_ops_recover_stuck_jobs(
+    stale_minutes: int = Query(default=15, ge=1, le=1440),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user_dep),
+):
+    require_admin_access(current_user)
+    tenant_id = _tenant_id_for_user(current_user)
+    cutoff = datetime.utcnow() - timedelta(minutes=int(stale_minutes))
+    rows = (
+        db.query(AsyncJob)
+        .filter(
+            AsyncJob.tenant_id == tenant_id,
+            AsyncJob.job_type == "document-process",
+            AsyncJob.status.in_(["queued", "running"]),
+        )
+        .all()
+    )
+    recovered = 0
+    for r in rows:
+        ref_dt = r.updated_at or r.started_at or r.created_at
+        if ref_dt and ref_dt < cutoff:
+            r.status = "queued"
+            r.started_at = None
+            r.finished_at = None
+            r.error = f"Recovered by admin at {_utc_now_iso()}"
+            r.updated_at = datetime.utcnow()
+            recovered += 1
+    db.commit()
+    try:
+        audit_log(
+            db,
+            tenant_id=tenant_id,
+            user_id=str(current_user.id),
+            action="ops.jobs.recover_stuck",
+            entity_type="async_job",
+            entity_id=None,
+            details={"recovered": recovered, "stale_minutes": int(stale_minutes)},
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+    return {"ok": True, "recovered": recovered, "stale_minutes": int(stale_minutes)}
 
 
 @app.get("/api/bank/accounts", response_model=list[BankAccountOut])
@@ -4253,7 +4567,6 @@ def quick_map_budget_category(
 
 @app.post("/api/documents", response_model=DocumentOut)
 async def upload_document(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user_dep),
@@ -4273,24 +4586,14 @@ async def upload_document(
 
     data = await file.read()
     content_sha256 = _document_content_sha256(data)
-    stored_data = data
-    stored_content_type = str(file.content_type or "")
-    stored_filename = file.filename or "document"
+    original_content_type = str(file.content_type or "")
+    original_filename = file.filename or "document"
 
-    # For image uploads, try converting to PDF first.
-    # If conversion fails, keep the original upload bytes/type as-is.
-    if is_convertible_image_content_type(stored_content_type):
-        try:
-            stored_data = convert_image_bytes_to_pdf(data)
-            stored_content_type = "application/pdf"
-            stored_filename = f"{Path(stored_filename).stem}.pdf"
-        except Exception as exc:
-            log.warning("Image->PDF conversie mislukt voor %s: %s", stored_filename, exc)
-
-    ext = Path(stored_filename).suffix or (".pdf" if stored_content_type == "application/pdf" else ".bin")
     document_id = str(uuid.uuid4())
-    storage_name = f"{document_id}{ext}"
-    file_path = Path(settings.uploads_dir) / storage_name
+    original_ext = Path(original_filename).suffix or ".bin"
+    original_storage_name = f"{document_id}_original{original_ext}"
+    original_file_path = Path(settings.uploads_dir) / original_storage_name
+    file_path = original_file_path
 
     duplicate = (
         db.query(Document)
@@ -4302,14 +4605,19 @@ async def upload_document(
         .order_by(Document.created_at.desc())
         .first()
     )
-    file_path.write_bytes(stored_data)
+    original_file_path.write_bytes(data)
 
     doc = Document(
         id=document_id,
         tenant_id=tenant_id,
-        filename=stored_filename or storage_name,
-        content_type=stored_content_type,
+        filename=original_filename,
+        content_type=original_content_type,
         file_path=str(file_path),
+        original_filename=original_filename,
+        original_content_type=original_content_type,
+        original_file_path=str(original_file_path),
+        preprocessed_file_path=None,
+        preprocessed_content_type=None,
         group_id=auto_group_id,
         uploaded_by_user_id=current_user.id,
         content_sha256=content_sha256,
@@ -4346,14 +4654,20 @@ async def upload_document(
 
     # For duplicates we first ask user whether to keep as separate version or delete.
     if not duplicate:
-        background_tasks.add_task(process_document_job, document_id, None)
+        _enqueue_document_process_job(
+            db,
+            tenant_id=tenant_id,
+            user_id=str(current_user.id),
+            document_id=document_id,
+            ocr_provider=None,
+            force=False,
+        )
     return document_to_out(doc)
 
 
 @app.post("/api/documents/{document_id}/duplicate/keep", response_model=DocumentOut)
 async def keep_duplicate_document(
     document_id: str,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user_dep),
 ):
@@ -4389,7 +4703,14 @@ async def keep_duplicate_document(
 
     # Start parsing only if it was not processed yet.
     if doc.status == "uploaded" and not bool(getattr(doc, "ocr_processed", False)):
-        background_tasks.add_task(process_document_job, str(doc.id), None)
+        _enqueue_document_process_job(
+            db,
+            tenant_id=tenant_id,
+            user_id=str(current_user.id),
+            document_id=str(doc.id),
+            ocr_provider=None,
+            force=False,
+        )
     return document_to_out(doc)
 
 
@@ -4885,7 +5206,6 @@ def get_document(
 @app.post("/api/documents/{document_id}/reprocess", response_model=DocumentOut)
 def reprocess_document(
     document_id: str,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user_dep),
 ):
@@ -4895,7 +5215,14 @@ def reprocess_document(
     db.commit()
     db.refresh(doc)
 
-    background_tasks.add_task(process_document_job, document_id, None, True)
+    _enqueue_document_process_job(
+        db,
+        tenant_id=_tenant_id_for_user(current_user),
+        user_id=str(current_user.id),
+        document_id=document_id,
+        ocr_provider=None,
+        force=True,
+    )
     return document_to_out(doc)
 
 
@@ -5249,12 +5576,58 @@ def search_documents(
 @app.get("/files/{document_id}")
 def download_original(
     document_id: str,
+    variant: str = Query(default="default"),
+    access_token: str | None = Query(default=None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user_dep),
+    authorization: str | None = Header(default=None),
 ):
+    auth_header = authorization
+    if not auth_header and access_token:
+        auth_header = f"Bearer {str(access_token).strip()}"
+    current_user = get_current_user(db, auth_header)
     doc = ensure_doc_access(db.get(Document, document_id), current_user)
-    media_type = str(getattr(doc, "content_type", "") or "").strip() or None
-    return FileResponse(doc.file_path, filename=doc.filename, media_type=media_type)
+    selected_path = str(getattr(doc, "file_path", "") or "").strip()
+    selected_type = str(getattr(doc, "content_type", "") or "").strip() or None
+    selected_name = str(getattr(doc, "filename", "") or "").strip() or f"{document_id}.bin"
+
+    requested_variant = str(variant or "").strip().lower()
+
+    # Explicit original variant: always try original artifact first.
+    if requested_variant == "original":
+        original_path = str(getattr(doc, "original_file_path", "") or "").strip()
+        original_type = str(getattr(doc, "original_content_type", "") or "").strip() or None
+        original_name = str(getattr(doc, "original_filename", "") or "").strip() or selected_name
+        if original_path and Path(original_path).exists():
+            selected_path = original_path
+            selected_type = original_type
+            selected_name = original_name
+
+    # Viewer prefers preprocessed artifact (better quality/OCR-oriented),
+    # then falls back to original.
+    elif requested_variant == "viewer":
+        pre_path = str(getattr(doc, "preprocessed_file_path", "") or "").strip()
+        pre_type = str(getattr(doc, "preprocessed_content_type", "") or "").strip() or None
+        if pre_path and Path(pre_path).exists():
+            selected_path = pre_path
+            selected_type = pre_type or "application/pdf"
+            if selected_type == "application/pdf" and not selected_name.lower().endswith(".pdf"):
+                selected_name = f"{Path(selected_name).stem}.pdf"
+        else:
+            original_path = str(getattr(doc, "original_file_path", "") or "").strip()
+            original_type = str(getattr(doc, "original_content_type", "") or "").strip() or None
+            original_name = str(getattr(doc, "original_filename", "") or "").strip() or selected_name
+            if original_path and Path(original_path).exists():
+                selected_path = original_path
+                selected_type = original_type
+                selected_name = original_name
+
+    disposition = "inline" if requested_variant in {"viewer", "original"} else "attachment"
+    return FileResponse(
+        selected_path,
+        filename=selected_name,
+        media_type=selected_type,
+        content_disposition_type=disposition,
+    )
 
 
 Path(settings.thumbnails_dir).mkdir(parents=True, exist_ok=True)

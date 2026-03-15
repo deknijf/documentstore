@@ -5,6 +5,7 @@ from app.config import settings
 
 def ensure_dirs() -> None:
     Path(settings.uploads_dir).mkdir(parents=True, exist_ok=True)
+    Path(settings.preprocessed_dir).mkdir(parents=True, exist_ok=True)
     Path(settings.thumbnails_dir).mkdir(parents=True, exist_ok=True)
     Path(settings.avatars_dir).mkdir(parents=True, exist_ok=True)
 
