@@ -1233,16 +1233,6 @@ button:disabled {
   justify-content: center;
 }
 
-.mobile-scan-hint {
-  margin-top: 10px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: rgba(208, 241, 233, 0.72);
-  color: #2b5f61;
-  font-size: 0.84rem;
-  line-height: 1.4;
-}
-
 .dropzone.drag {
   background: #dff2ff;
   color: #2170a6;
@@ -2986,79 +2976,6 @@ button:disabled {
   box-sizing: border-box;
 }
 
-dialog {
-  border: 0;
-  border-radius: 14px;
-  width: min(760px, 96vw);
-}
-
-.scan-assist-modal::backdrop {
-  background: rgba(9, 18, 36, 0.36);
-}
-
-.scan-assist-inner {
-  display: grid;
-  gap: 14px;
-  padding: 20px;
-  background: #f7fbff;
-  color: #22365c;
-}
-
-.scan-assist-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.scan-assist-head h3 {
-  margin: 0;
-  font-size: 1.35rem;
-}
-
-.scan-assist-copy {
-  margin: 0;
-  color: #47638f;
-  line-height: 1.5;
-}
-
-.scan-assist-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.scan-assist-card {
-  display: grid;
-  gap: 10px;
-  padding: 14px;
-  border-radius: 14px;
-  background: #e9f2fd;
-}
-
-.scan-assist-card h4 {
-  margin: 0;
-  font-size: 1rem;
-}
-
-.scan-assist-card p {
-  margin: 0;
-  color: #4b648d;
-  line-height: 1.45;
-}
-
-.scan-assist-actions {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.scan-assist-steps {
-  margin: 0;
-  padding-left: 18px;
-  color: #425f8f;
-  line-height: 1.55;
-}
-
 #detailContent {
   max-height: 66vh;
   overflow: auto;
@@ -3377,11 +3294,5 @@ dialog {
     width: 100% !important;
     margin: 0;
     justify-self: stretch;
-  }
-  .mobile-scan-hint {
-    display: block;
-  }
-  .scan-assist-grid {
-    grid-template-columns: 1fr;
   }
 }

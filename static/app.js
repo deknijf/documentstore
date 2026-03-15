@@ -82,10 +82,7 @@ const ocrAiBtn = document.getElementById("ocrAiBtn");
 
 const fileInput = document.getElementById("fileInput");
 const cameraInput = document.getElementById("cameraInput");
-const scanAssistBtn = document.getElementById("scanAssistBtn");
-const scanAssistModal = document.getElementById("scanAssistModal");
-const scanFairScanBtn = document.getElementById("scanFairScanBtn");
-const scanUseCameraBtn = document.getElementById("scanUseCameraBtn");
+const cameraCaptureBtn = document.getElementById("cameraCaptureBtn");
 const dropzone = document.getElementById("dropzone");
 const documentCards = document.getElementById("documentCards");
 const documentsPager = document.getElementById("documentsPager");
@@ -344,9 +341,6 @@ let budgetAnalysisMeta = null;
 let budgetAnalyzeProgressTimer = null;
 let analyzeJobPollTimer = null;
 let checkBankJobPollTimer = null;
-let serviceWorkerRegistration = null;
-let pendingSharedBatches = [];
-let sharedBatchImportInFlight = false;
 let savedViews = [];
 let auditLogs = [];
 let adminOps = null;
@@ -799,141 +793,6 @@ async function authFetch(url, options = {}) {
     throw new Error("Not authenticated");
   }
   return res;
-}
-
-function canUseShareTargetPwa() {
-  return (
-    typeof navigator !== "undefined" &&
-    "serviceWorker" in navigator &&
-    (window.isSecureContext || ["localhost", "127.0.0.1"].includes(location.hostname))
-  );
-}
-
-function activeServiceWorker() {
-  return (
-    navigator.serviceWorker?.controller ||
-    serviceWorkerRegistration?.active ||
-    serviceWorkerRegistration?.waiting ||
-    serviceWorkerRegistration?.installing ||
-    null
-  );
-}
-
-function postToServiceWorker(message) {
-  const worker = activeServiceWorker();
-  if (worker) worker.postMessage(message);
-}
-
-function requestPendingSharedFiles() {
-  if (!canUseShareTargetPwa()) return;
-  postToServiceWorker({ type: "docstore-share-consume" });
-}
-
-function openScanAssistModal() {
-  if (scanAssistModal && typeof scanAssistModal.showModal === "function") {
-    scanAssistModal.showModal();
-  }
-}
-
-function closeScanAssistModal() {
-  if (scanAssistModal?.open) scanAssistModal.close();
-}
-
-function tryOpenFairScan() {
-  const fallbackUrl = "https://f-droid.org/packages/org.fairscan.app/";
-  const packageName = "org.fairscan.app";
-  if (!/android/i.test(navigator.userAgent || "")) {
-    window.open(fallbackUrl, "_blank", "noopener");
-    return;
-  }
-  closeScanAssistModal();
-  const fallback = encodeURIComponent(fallbackUrl);
-  // Best-effort Android intent. If FairScan is not installed, Chrome falls back to the install page.
-  window.location.href = `intent://scan/#Intent;package=${packageName};action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;S.browser_fallback_url=${fallback};end`;
-}
-
-function queuePendingSharedBatches(batches) {
-  const incoming = Array.isArray(batches) ? batches : [];
-  if (!incoming.length) return;
-  const existingIds = new Set(pendingSharedBatches.map((batch) => String(batch?.id || "")));
-  incoming.forEach((batch) => {
-    const batchId = String(batch?.id || "").trim();
-    const items = Array.isArray(batch?.items) ? batch.items.filter((file) => file instanceof File && file.size > 0) : [];
-    if (!batchId || !items.length || existingIds.has(batchId)) return;
-    pendingSharedBatches.push({
-      id: batchId,
-      created_at: Number(batch?.created_at || Date.now()),
-      items,
-    });
-    existingIds.add(batchId);
-  });
-  pendingSharedBatches.sort((a, b) => Number(a.created_at || 0) - Number(b.created_at || 0));
-  void importPendingSharedBatches();
-}
-
-async function importPendingSharedBatches() {
-  if (sharedBatchImportInFlight || !token || !pendingSharedBatches.length) return;
-  sharedBatchImportInFlight = true;
-  let importedCount = 0;
-  const completedBatchIds = [];
-  try {
-    while (pendingSharedBatches.length) {
-      const batch = pendingSharedBatches[0];
-      if (!batch?.id || !Array.isArray(batch.items) || !batch.items.length) {
-        pendingSharedBatches.shift();
-        continue;
-      }
-      for (const file of batch.items) {
-        await uploadFile(file, { refresh: false, showErrors: false });
-        importedCount += 1;
-      }
-      completedBatchIds.push(batch.id);
-      pendingSharedBatches.shift();
-    }
-    if (completedBatchIds.length) {
-      postToServiceWorker({ type: "docstore-share-ack", ids: completedBatchIds });
-      await loadDocs();
-      if (currentTabId() === "dashboard") renderDashboard();
-      if (currentTabId() === "documents") renderDocuments();
-      showToast(`${importedCount} gedeelde scan${importedCount === 1 ? "" : "s"} toegevoegd.`);
-    }
-  } catch (err) {
-    console.warn("Shared file import failed", err);
-    showToast("Gedeelde scan kon nog niet verwerkt worden.");
-  } finally {
-    sharedBatchImportInFlight = false;
-  }
-}
-
-async function registerShareTargetPwa() {
-  if (!canUseShareTargetPwa()) return;
-  try {
-    navigator.serviceWorker.addEventListener("message", (event) => {
-      const data = event?.data || {};
-      if (data.type === "docstore-share-available") {
-        requestPendingSharedFiles();
-        return;
-      }
-      if (data.type === "docstore-share-files") {
-        queuePendingSharedBatches(data.batches);
-      }
-    });
-    serviceWorkerRegistration = await navigator.serviceWorker.register("/service-worker.js", { scope: "/" });
-    await navigator.serviceWorker.ready;
-    if (navigator.serviceWorker.controller) {
-      requestPendingSharedFiles();
-    } else {
-      navigator.serviceWorker.addEventListener(
-        "controllerchange",
-        () => {
-          requestPendingSharedFiles();
-        },
-        { once: true },
-      );
-    }
-  } catch (err) {
-    console.warn("Service worker registration failed", err);
-  }
 }
 
 function setOptions(select, items, valueKey = "id", labelKey = "name", includeAll = false, allLabel = "Alle") {
@@ -5010,9 +4869,6 @@ async function bootstrap() {
   await loadLabels();
   await loadProviders();
   await loadDocs();
-  requestPendingSharedFiles();
-  await importPendingSharedBatches();
-
   if (isAdminUser) {
     await loadAdminUsers();
     await loadIntegrations();
@@ -5267,14 +5123,7 @@ switchFromResetToLoginLink?.addEventListener("click", () => {
 logoutBtn.addEventListener("click", logout);
 mobileMenuBtn.addEventListener("click", toggleMobileNav);
 mobileNavBackdrop.addEventListener("click", closeMobileNav);
-scanAssistBtn?.addEventListener("click", () => {
-  openScanAssistModal();
-});
-scanFairScanBtn?.addEventListener("click", () => {
-  tryOpenFairScan();
-});
-scanUseCameraBtn?.addEventListener("click", () => {
-  closeScanAssistModal();
+cameraCaptureBtn?.addEventListener("click", () => {
   cameraInput?.click();
 });
 window.addEventListener("resize", () => {
@@ -6029,5 +5878,4 @@ checkBankBtn?.addEventListener("click", () => {
   void checkBankPaymentsForDocuments();
 });
 
-void registerShareTargetPwa();
 bootstrap();
