@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     # Single source of truth for release versioning.
-    # Example: 0.6.5
+    # Example: 0.6.6
     version: str = __version__
     # Public base URL (used for absolute links in emails, etc.)
     # Example: https://docstore.deknijf.eu
@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     # App version metadata (stored in DB for upgrade tracking; typically equals the git tag without leading "v")
     # Example: ${VERSION}
     app_version: str | None = None
-    # Optional git tag/commit metadata for diagnostics. Example: v0.6.5
+    # Optional git tag/commit metadata for diagnostics. Example: v0.6.6
     git_tag: str | None = None
 
     # Security / deployment

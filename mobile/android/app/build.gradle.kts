@@ -38,7 +38,7 @@ fun toVersionCode(version: String): Int {
 fun ensureTrailingSlash(value: String): String = if (value.endsWith("/")) value else "$value/"
 
 val docstoreEnv = loadDocstoreEnv()
-val appSemver = envValue(docstoreEnv, "VERSION", "0.6.5")
+val appSemver = envValue(docstoreEnv, "VERSION", "0.6.6")
 val mobileBaseUrl = ensureTrailingSlash(
     envValue(
         docstoreEnv,
