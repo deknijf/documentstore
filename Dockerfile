@@ -1,7 +1,16 @@
 FROM python:3.13-slim
 
+ARG APP_VERSION=0.6.5
+ARG GIT_TAG=v0.6.5
+
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+ENV APP_VERSION=${APP_VERSION}
+ENV GIT_TAG=${GIT_TAG}
+
+LABEL org.opencontainers.image.title="docstore"
+LABEL org.opencontainers.image.version="${APP_VERSION}"
+LABEL org.opencontainers.image.ref.name="${GIT_TAG}"
 
 WORKDIR /app
 

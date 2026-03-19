@@ -1,6 +1,10 @@
 services:
   documentstore:
-    build: .
+    build:
+      context: .
+      args:
+        APP_VERSION: ${APP_VERSION}
+        GIT_TAG: ${GIT_TAG}
     #image: deknijf/docstore:${GIT_TAG}
     container_name: documentstore
     ports:

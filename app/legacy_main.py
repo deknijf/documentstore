@@ -125,6 +125,8 @@ MAIL_INGEST_THREAD: Thread | None = None
 DOCUMENT_JOB_STOP_EVENT = Event()
 DOCUMENT_JOB_THREAD: Thread | None = None
 GROUPS_ENABLED = False
+ANDROID_APK_RELATIVE_PATH = "mobile/docstore-mobile-latest.apk"
+ANDROID_APK_STATIC_PATH = Path("static") / ANDROID_APK_RELATIVE_PATH
 
 
 def _slugify_tenant(value: str) -> str:
@@ -172,6 +174,19 @@ def _send_smtp_email(runtime: dict[str, str | None], recipient: str, subject: st
         smtp.ehlo()
         smtp.login(username, password)
         smtp.send_message(msg)
+
+
+def android_apk_meta() -> dict:
+    exists = ANDROID_APK_STATIC_PATH.exists()
+    size_bytes = ANDROID_APK_STATIC_PATH.stat().st_size if exists else 0
+    return {
+        "available": exists,
+        "version": str(settings.app_version or settings.version or "0.0.0"),
+        "git_tag": str(settings.git_tag or f"v{settings.version}"),
+        "download_path": "/downloads/android-apk" if exists else None,
+        "direct_path": f"/{ANDROID_APK_RELATIVE_PATH}" if exists else None,
+        "size_bytes": size_bytes,
+    }
 
 def _split_csv_env(value: str) -> list[str]:
     return [p.strip() for p in (value or "").split(",") if p.strip()]
@@ -2143,7 +2158,12 @@ def shutdown() -> None:
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "app_version": str(settings.app_version or settings.version or "0.0.0"),
+        "git_tag": str(settings.git_tag or f"v{settings.version}"),
+        "android_apk": android_apk_meta(),
+    }
 
 
 @app.post("/api/auth/login", response_model=AuthOut)

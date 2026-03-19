@@ -1,8 +1,9 @@
 from pathlib import Path
 import ipaddress
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi import Request
 from fastapi.responses import PlainTextResponse
@@ -106,6 +107,20 @@ app.include_router(views.router)
 app.include_router(bank.router)
 app.include_router(admin.router)
 app.include_router(audit.router)
+
+
+@app.get("/downloads/android-apk")
+def download_android_apk() -> FileResponse:
+    apk_meta = legacy_main.android_apk_meta()
+    apk_path = Path("static/mobile/docstore-mobile-latest.apk")
+    if not apk_meta.get("available") or not apk_path.exists():
+        raise HTTPException(status_code=404, detail="Android APK niet beschikbaar")
+    version = str(apk_meta.get("version") or settings.app_version or settings.version or "0.0.0")
+    return FileResponse(
+        apk_path,
+        media_type="application/vnd.android.package-archive",
+        filename=f"docstore-mobile-{version}.apk",
+    )
 
 
 @app.on_event("startup")

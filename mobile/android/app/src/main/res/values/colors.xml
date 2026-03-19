@@ -1,0 +1,9 @@
+<resources>
+    <color name="docstore_blue">#2F69D9</color>
+    <color name="docstore_blue_dark">#1C3E7C</color>
+    <color name="docstore_green">#4DD1B0</color>
+    <color name="docstore_bg">#F4F8FF</color>
+    <color name="docstore_surface">#FFFFFF</color>
+    <color name="docstore_text">#19335E</color>
+    <color name="docstore_muted">#6D7E9B</color>
+</resources>

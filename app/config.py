@@ -1,3 +1,4 @@
+from app import __version__
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -11,15 +12,15 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     # Single source of truth for release versioning.
-    # Example: 0.6.4
-    version: str = "0.6.4"
+    # Example: 0.6.5
+    version: str = __version__
     # Public base URL (used for absolute links in emails, etc.)
     # Example: https://docstore.deknijf.eu
     public_base_url: str | None = None
     # App version metadata (stored in DB for upgrade tracking; typically equals the git tag without leading "v")
     # Example: ${VERSION}
     app_version: str | None = None
-    # Optional git tag/commit metadata for diagnostics. Example: v0.6.4
+    # Optional git tag/commit metadata for diagnostics. Example: v0.6.5
     git_tag: str | None = None
 
     # Security / deployment

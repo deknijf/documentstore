@@ -173,6 +173,10 @@ const selfAvatarInput = document.getElementById("selfAvatarInput");
 const selfAvatarPreview = document.getElementById("selfAvatarPreview");
 const uploadAvatarBtn = document.getElementById("uploadAvatarBtn");
 const saveSelfBtn = document.getElementById("saveSelfBtn");
+const androidInstallWrap = document.getElementById("androidInstallWrap");
+const androidInstallTitle = document.getElementById("androidInstallTitle");
+const androidInstallMeta = document.getElementById("androidInstallMeta");
+const installAndroidAppBtn = document.getElementById("installAndroidAppBtn");
 
 const groupsList = document.getElementById("groupsList");
 const newGroupName = document.getElementById("newGroupName");
@@ -315,6 +319,7 @@ let searchRequestSeq = 0;
 let facetsExpanded = false;
 let dashboardPage = 1;
 let documentsPage = 1;
+let appMeta = { status: "unknown", app_version: "", git_tag: "", android_apk: { available: false } };
 const PAGE_SIZE = 12;
 const CATEGORY_PAGE_SIZE = 9;
 // Force fresh thumbnail fetch per page load so regenerated thumbs are visible immediately.
@@ -1665,6 +1670,38 @@ function populateSelfProfile() {
       selfAvatarPreview.classList.add("hidden");
     }
   }
+  renderAndroidInstallSection();
+}
+
+function isAndroidMobileDevice() {
+  const ua = String(navigator.userAgent || navigator.vendor || "").trim();
+  return /Android/i.test(ua) && /Mobile/i.test(ua);
+}
+
+function renderAndroidInstallSection() {
+  if (!androidInstallWrap || !installAndroidAppBtn || !androidInstallMeta || !androidInstallTitle) return;
+  const apk = appMeta?.android_apk || {};
+  const isAndroid = isAndroidMobileDevice();
+  const available = !!apk.available;
+  androidInstallWrap.classList.toggle("hidden", !isAndroid);
+  if (!isAndroid) return;
+  const versionLabel = String(apk.version || appMeta.app_version || "").trim();
+  androidInstallTitle.textContent = versionLabel ? `Docstore voor Android v${versionLabel}` : "Docstore voor Android";
+  androidInstallMeta.textContent = available
+    ? "Download en installeer de native APK rechtstreeks vanaf deze server."
+    : "Installatiebestand momenteel niet beschikbaar op deze server.";
+  installAndroidAppBtn.disabled = !available;
+}
+
+async function loadAppMeta() {
+  try {
+    const res = await fetch("/api/health", { cache: "no-store" });
+    if (!res.ok) throw new Error("health unavailable");
+    appMeta = await res.json();
+  } catch {
+    appMeta = { status: "unknown", app_version: "", git_tag: "", android_apk: { available: false } };
+  }
+  renderAndroidInstallSection();
 }
 
 function isMobileLayout() {
@@ -4846,6 +4883,7 @@ async function bootstrap() {
   const meRes = await authFetch("/api/auth/me");
   if (!meRes.ok) return logout();
   currentUser = await meRes.json();
+  await loadAppMeta();
 
   loginView.classList.add("hidden");
   appView.classList.remove("hidden");
@@ -5543,6 +5581,16 @@ if (deleteUserDetailBtn) {
 }
 if (saveSelfBtn) {
   saveSelfBtn.addEventListener("click", saveOwnProfile);
+}
+if (installAndroidAppBtn) {
+  installAndroidAppBtn.addEventListener("click", () => {
+    const apkPath = String(appMeta?.android_apk?.download_path || "").trim();
+    if (!apkPath) {
+      showToast("Android app is momenteel niet beschikbaar");
+      return;
+    }
+    window.location.assign(apkPath);
+  });
 }
 if (createTenantBtn) {
   createTenantBtn.addEventListener("click", () => {

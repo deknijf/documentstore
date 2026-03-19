@@ -821,6 +821,22 @@ body {
   gap: 10px;
 }
 
+.install-app-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: linear-gradient(90deg, rgba(61,165,255,0.14), rgba(66,207,166,0.14));
+}
+
+.install-app-card strong {
+  display: block;
+  color: #233a64;
+  margin-bottom: 4px;
+}
+
 .self-avatar-preview {
   width: 36px;
   height: 36px;
@@ -858,6 +874,13 @@ body {
   grid-template-columns: 1fr auto;
   gap: 8px;
   align-items: center;
+}
+
+@media (max-width: 700px) {
+  .install-app-card {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 
 .tenant-user-badges {
