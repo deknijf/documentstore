@@ -14,28 +14,23 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.ui.platform.LocalContext
 import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import androidx.navigation.navArgument
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import eu.deknijf.docstoremobile.ui.screens.auth.LoginScreen
-import eu.deknijf.docstoremobile.ui.screens.detail.DocumentDetailScreen
 import eu.deknijf.docstoremobile.ui.screens.documents.DocumentsScreen
 import eu.deknijf.docstoremobile.ui.screens.queue.QueueScreen
 import eu.deknijf.docstoremobile.ui.screens.scan.ScanPreviewScreen
 import eu.deknijf.docstoremobile.ui.theme.DocstoreTheme
-import eu.deknijf.docstoremobile.ui.viewmodel.DocumentDetailViewModel
 import eu.deknijf.docstoremobile.ui.viewmodel.DocumentsViewModel
 import eu.deknijf.docstoremobile.ui.viewmodel.LoginViewModel
 import eu.deknijf.docstoremobile.util.FileUtils
@@ -97,7 +92,6 @@ class MainActivity : ComponentActivity() {
                             uploadQueueRepository = container.uploadQueueRepository,
                         )
                     })
-                    val context = LocalContext.current
                     val scope = rememberCoroutineScope()
 
                     LaunchedEffect(Unit) { docsVm.refresh() }
@@ -116,7 +110,7 @@ class MainActivity : ComponentActivity() {
                                 viewModel = docsVm,
                                 snackbarHostState = snackbarHostState,
                                 currentUser = user!!,
-                                onOpenDocument = { navController.navigate("document/$it") },
+                                onOpenDocument = { openDocumentInBrowser(it) },
                                 onOpenQueue = { navController.navigate("queue") },
                                 onScanDocument = { startNativeScan(ScanContinuationMode.REPLACE) },
                                 onImportFile = { importLauncher.launch(arrayOf("application/pdf", "image/*")) },
@@ -137,12 +131,12 @@ class MainActivity : ComponentActivity() {
                                     }
                                 },
                                 onRetry = {
-                                    SyncScheduler.enqueueImmediate(context)
+                                    SyncScheduler.enqueueImmediate(applicationContext)
                                     docsVm.refresh()
                                 },
                                 onScanDocument = { startNativeScan(ScanContinuationMode.REPLACE) },
                                 onImportFile = { importLauncher.launch(arrayOf("application/pdf", "image/*")) },
-                                onOpenDocument = { navController.navigate("document/$it") },
+                                onOpenDocument = { openDocumentInBrowser(it) },
                                 onBack = { navController.popBackStack() },
                             )
                         }
@@ -171,34 +165,6 @@ class MainActivity : ComponentActivity() {
                                     },
                                 )
                             }
-                        }
-                        composable(
-                            route = "document/{documentId}",
-                            arguments = listOf(navArgument("documentId") { type = NavType.StringType }),
-                        ) { backStack ->
-                            val documentId = requireNotNull(backStack.arguments?.getString("documentId"))
-                            val detailVm: DocumentDetailViewModel = viewModel(
-                                key = documentId,
-                                factory = factory {
-                                    DocumentDetailViewModel(
-                                        documentId = documentId,
-                                        tokenProvider = { container.sessionStore.tokenFlow.first() },
-                                        documentsRepository = container.documentsRepository,
-                                    )
-                                },
-                            )
-                            DocumentDetailScreen(
-                                viewModel = detailVm,
-                                currentUser = user!!,
-                                onBack = { navController.popBackStack() },
-                                onOpenViewer = { docId, variant ->
-                                    scope.launch {
-                                        val token = container.sessionStore.tokenFlow.first().orEmpty()
-                                        val url = "${BuildConfig.DOCSTORE_BASE_URL}files/$docId?variant=$variant&access_token=$token"
-                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                                    }
-                                },
-                            )
                         }
                     }
                 }
@@ -257,6 +223,11 @@ class MainActivity : ComponentActivity() {
                 onQueuedMessage?.invoke(ex.message ?: "Kon scan niet voorbereiden")
             }
         }
+    }
+
+    private fun openDocumentInBrowser(documentId: String) {
+        val url = "${BuildConfig.DOCSTORE_BASE_URL}#/documenten/$documentId"
+        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
     }
 
     private fun queueScan(uri: Uri, displayName: String?, mimeType: String) {

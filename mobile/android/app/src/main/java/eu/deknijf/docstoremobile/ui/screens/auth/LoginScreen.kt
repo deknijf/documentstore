@@ -102,6 +102,12 @@ fun LoginScreen(
                     }
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(
+                            text = "DOCUMENT CENTER",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
                             text = "docstore",
                             style = MaterialTheme.typography.headlineMedium,
                             fontWeight = FontWeight.ExtraBold,

@@ -2035,15 +2035,15 @@ function parseAmountWithCurrency(value, fallbackCurrency = "EUR") {
 }
 
 function renderDashboard() {
-  const filtered = docs.filter(matchesFilters);
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const visibleDocs = docs;
+  const totalPages = Math.max(1, Math.ceil(visibleDocs.length / PAGE_SIZE));
   dashboardPage = Math.min(Math.max(1, dashboardPage), totalPages);
   const start = (dashboardPage - 1) * PAGE_SIZE;
-  const pageItems = filtered.slice(start, start + PAGE_SIZE);
+  const pageItems = visibleDocs.slice(start, start + PAGE_SIZE);
   dashboardCards.innerHTML =
     pageItems.map((d) => cardTemplate(d, { selectable: true, selected: selectedActiveIds.has(d.id) })).join("") ||
-    "<div class='panel'>Geen resultaten.</div>";
-  renderPager(dashboardPager, filtered.length, dashboardPage, (next) => {
+    "<div class='panel'>Nog geen documenten.</div>";
+  renderPager(dashboardPager, visibleDocs.length, dashboardPage, (next) => {
     dashboardPage = next;
     renderDashboard();
   });

@@ -2,6 +2,7 @@ package eu.deknijf.docstoremobile.ui.screens.scan
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,6 +19,7 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.PhotoCamera
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -30,11 +32,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import eu.deknijf.docstoremobile.R
 import eu.deknijf.docstoremobile.data.model.UserDto
 import java.io.File
 import java.text.DecimalFormat
@@ -56,12 +61,11 @@ fun ScanPreviewScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .padding(horizontal = 18.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+            .background(MaterialTheme.colorScheme.background),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item {
-            PreviewHero(
+            PreviewMasthead(
                 currentUser = currentUser,
                 pageCount = pages.size,
                 draftCreatedAt = draftCreatedAt,
@@ -74,6 +78,7 @@ fun ScanPreviewScreen(
                 pageCount = pages.size,
                 onAddPage = onAddPage,
                 onSave = onSave,
+                modifier = Modifier.padding(horizontal = 18.dp),
             )
         }
         itemsIndexed(pages, key = { _, file -> file.absolutePath }) { index, file ->
@@ -81,6 +86,7 @@ fun ScanPreviewScreen(
                 pageNumber = index + 1,
                 totalPages = pages.size,
                 file = file,
+                modifier = Modifier.padding(horizontal = 18.dp),
             )
         }
         item { Spacer(modifier = Modifier.height(18.dp)) }
@@ -88,37 +94,93 @@ fun ScanPreviewScreen(
 }
 
 @Composable
-private fun PreviewHero(
+private fun PreviewMasthead(
     currentUser: UserDto,
     pageCount: Int,
     draftCreatedAt: Long,
     onBack: () -> Unit,
     onRescan: () -> Unit,
 ) {
-    Row(
+    Surface(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
+        color = MaterialTheme.colorScheme.primary,
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            MaterialTheme.colorScheme.primary,
+                            Color(0xFF254E8F),
+                        ),
+                    ),
+                )
+                .padding(horizontal = 18.dp, vertical = 22.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Terug")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = Color.White.copy(alpha = 0.10f),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            IconButton(onClick = onBack, modifier = Modifier.size(34.dp)) {
+                                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Terug", tint = Color.White)
+                            }
+                            androidx.compose.foundation.Image(
+                                painter = painterResource(R.drawable.docstore_logo),
+                                contentDescription = "Docstore",
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .clip(RoundedCornerShape(10.dp)),
+                                contentScale = ContentScale.Fit,
+                            )
+                        }
+                    }
+                    Column {
+                        Text(
+                            "DOCUMENT CENTER",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Color.White.copy(alpha = 0.78f),
+                            fontWeight = FontWeight.ExtraBold,
+                        )
+                        Text("Scan preview", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                        Text(
+                            "${currentUser.tenantName ?: "tenant"} · $pageCount pagina${if (pageCount == 1) "" else "'s"} · ${formatPreviewTimestamp(draftCreatedAt)}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color.White.copy(alpha = 0.82f),
+                        )
+                    }
+                }
+                IconButton(onClick = onRescan) {
+                    Icon(Icons.Rounded.Refresh, contentDescription = "Opnieuw scannen", tint = Color.White)
+                }
             }
-            Column {
-                Text("Scan preview", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold)
+
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = Color.White.copy(alpha = 0.08f),
+            ) {
                 Text(
-                    "${currentUser.tenantName ?: "Tenant"} · $pageCount pagina${if (pageCount == 1) "" else "'s"} · ${formatPreviewTimestamp(draftCreatedAt)}",
+                    text = "Controleer de scan eerst. Pas na bewaren maken we één definitieve PDF en zetten we die in de lokale uploadqueue.",
+                    modifier = Modifier.padding(16.dp),
+                    color = Color.White,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-        }
-        OutlinedButton(onClick = onRescan, shape = RoundedCornerShape(16.dp)) {
-            Icon(Icons.Rounded.PhotoCamera, contentDescription = null)
-            Text(" Opnieuw")
         }
     }
 }
@@ -128,20 +190,27 @@ private fun PreviewInfoCard(
     pageCount: Int,
     onAddPage: () -> Unit,
     onSave: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Surface(
         shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surface,
         tonalElevation = 2.dp,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
     ) {
         Column(
             modifier = Modifier.padding(18.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("Controleer de scan eerst", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
             Text(
-                "De scan staat nog niet in de uploadqueue. Bekijk eerst alle pagina's, voeg indien nodig nog een extra pagina toe en bewaar pas daarna de definitieve PDF.",
+                "SCAN REVIEW",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.ExtraBold,
+            )
+            Text("Scan controleren", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+            Text(
+                "Deze mobile app blijft bewust beperkt tot scannen en uploaden. Je controleert hier de pagina's, voegt indien nodig een extra pagina toe en stuurt daarna één nette PDF door naar de webapp.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -180,12 +249,13 @@ private fun PreviewPageCard(
     pageNumber: Int,
     totalPages: Int,
     file: File,
+    modifier: Modifier = Modifier,
 ) {
     Surface(
         shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surface,
         tonalElevation = 2.dp,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
     ) {
         Column(
             modifier = Modifier.padding(14.dp),
