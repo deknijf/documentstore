@@ -4,6 +4,7 @@ from pathlib import Path
 
 from app.config import settings
 from app.models import Document
+from app.services.pdf_text import has_usable_text_layer
 from app.services.document_conversion import (
     convert_pdf_file_to_optimized_pdf,
     convert_image_file_to_pdf,
@@ -59,6 +60,15 @@ def ensure_preprocessed_document(doc: Document, rebuild: bool = False) -> tuple[
     source_path, source_type = original_source_for(doc)
     if not source_path:
         return current_path, current_type, False
+
+    # A born-digital PDF never gets a raster derivative, not even one that was
+    # produced before this rule existed.
+    if (
+        source_type == "application/pdf"
+        and settings.pdf_text_layer_enabled
+        and has_usable_text_layer(source_path, min_quality=settings.pdf_text_layer_min_quality)
+    ):
+        return source_path, source_type, False
 
     target = _preprocessed_path_for(doc)
     preprocessed_path = str(getattr(doc, "preprocessed_file_path", "") or "").strip()

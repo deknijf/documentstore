@@ -20,6 +20,7 @@ from app.services.ocr.google_provider import GoogleOCRProvider
 from app.services.ocr.openai_provider import OpenAIOCRProvider
 from app.services.ocr.openrouter_provider import OpenRouterOCRProvider
 from app.services.ocr.textract_provider import TextractOCRProvider
+from app.services.text_quality import ocr_quality_score
 from app.services.thumbnail_service import ThumbnailService
 
 
@@ -34,38 +35,6 @@ def _ocr_text_hash(text: str | None) -> str | None:
     if not norm:
         return None
     return hashlib.sha256(norm.encode("utf-8")).hexdigest()
-
-
-def _ocr_quality_score(text: str | None) -> float:
-    raw = str(text or "").strip()
-    if not raw:
-        return 0.0
-    compact = re.sub(r"\s+", " ", raw).strip()
-    lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
-    words = re.findall(r"[A-Za-z0-9][A-Za-z0-9\-/\.,:]{1,}", compact)
-    letters = re.findall(r"[A-Za-zÀ-ÿ]", compact)
-    chars = len(compact)
-    line_count = len(lines)
-    word_count = len(words)
-    letter_ratio = (len(letters) / chars) if chars else 0.0
-
-    score = 0.0
-    # Enough signal in extracted text.
-    score += min(0.35, chars / 2400.0)
-    score += min(0.20, line_count / 28.0)
-    score += min(0.20, word_count / 220.0)
-    # OCR garbage often has too little alphabetic density.
-    if letter_ratio >= 0.45:
-        score += 0.18
-    elif letter_ratio >= 0.30:
-        score += 0.1
-    # Bonus for structured content patterns commonly present in invoices/bills.
-    if re.search(r"\b[A-Z]{2}[0-9]{2}[A-Z0-9]{8,}\b", compact):
-        score += 0.04
-    if re.search(r"\b\d{2}[/-]\d{2}[/-]\d{2,4}\b", compact):
-        score += 0.03
-
-    return round(min(1.0, score), 4)
 
 
 def _normalize_structured_reference(value: str | None) -> str | None:
@@ -385,6 +354,27 @@ def _apply_extraction_hints(
                 }
             break
     return hint_applied
+
+
+def _drop_preprocessed_derivative(doc: Document) -> None:
+    """Forget a raster derivative that is no longer in use.
+
+    Without this a document that stops being preprocessed keeps pointing the
+    detail viewer at a stale rasterised copy of itself.
+    """
+    stale = str(getattr(doc, "preprocessed_file_path", "") or "").strip()
+    doc.preprocessed_file_path = None
+    doc.preprocessed_content_type = None
+    if not stale:
+        return
+    try:
+        path = Path(stale).resolve()
+        root = Path(settings.preprocessed_dir).resolve()
+        if path.is_file() and root in path.parents:
+            path.unlink()
+    except Exception:
+        # A leftover derivative costs disk space, never correctness.
+        pass
 
 
 def _get_ocr_provider(provider_name: str, runtime: dict):
@@ -711,6 +701,8 @@ def process_document(db: Session, document_id: str, ocr_provider_name: str | Non
                     doc.preprocessed_file_path = process_path
                 if used_preprocessed and process_type:
                     doc.preprocessed_content_type = process_type
+                if not used_preprocessed:
+                    _drop_preprocessed_derivative(doc)
                 if process_type == "application/pdf" and doc.filename and not str(doc.filename).lower().endswith(".pdf"):
                     doc.filename = f"{Path(str(doc.filename)).stem}.pdf"
             except Exception:
@@ -740,13 +732,13 @@ def process_document(db: Session, document_id: str, ocr_provider_name: str | Non
                 and Path(str(original_path)).exists()
                 and str(original_path) != str(process_path)
             ):
-                optimized_score = _ocr_quality_score(ocr_text)
+                optimized_score = ocr_quality_score(ocr_text)
                 min_quality = float(getattr(settings, "doc_preprocess_ocr_fallback_min_quality", 0.62) or 0.62)
                 min_gain = float(getattr(settings, "doc_preprocess_ocr_fallback_min_gain", 0.06) or 0.06)
                 if optimized_score < min_quality:
                     try:
                         original_ocr_text = ocr_provider.extract_text(str(original_path), str(original_type or process_type))
-                        original_score = _ocr_quality_score(original_ocr_text)
+                        original_score = ocr_quality_score(original_ocr_text)
                         if original_score >= (optimized_score + min_gain):
                             ocr_text = original_ocr_text
                     except Exception:

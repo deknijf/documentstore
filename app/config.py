@@ -65,6 +65,10 @@ class Settings(BaseSettings):
     # If OpenCV is unavailable, processing safely falls back to the PIL-only pipeline.
     doc_preprocess_opencv_enabled: bool = True
     doc_preprocess_pdf_enabled: bool = True
+    # Skip the scan pipeline for PDFs that already carry their own text layer.
+    # Rasterising those would replace crisp, selectable text with a JPEG.
+    pdf_text_layer_enabled: bool = True
+    pdf_text_layer_min_quality: float = 0.62
     doc_preprocess_perspective_enabled: bool = True
     doc_preprocess_deskew_enabled: bool = True
     doc_preprocess_enhance_enabled: bool = True
