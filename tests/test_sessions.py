@@ -128,3 +128,28 @@ def test_schema_version_matches_the_application(client):
     with engine.begin() as conn:
         recorded = conn.execute(text("SELECT schema_version FROM schema_migrations WHERE id = 1")).scalar()
     assert recorded == __db_schema_version__
+
+
+def test_production_refuses_to_trust_forwarded_headers_from_every_peer(monkeypatch):
+    """With '*' any client can spoof its address in the audit log."""
+    import pytest
+
+    from app.config import settings
+    from app.db import SessionLocal
+    from app.legacy_main import _startup_guardrails_and_cleanup
+
+    monkeypatch.setattr(settings, "environment", "production")
+    monkeypatch.setattr(settings, "allowed_hosts", "docstore.example")
+    monkeypatch.setattr(settings, "integration_master_key", "een-echte-sleutel")
+    monkeypatch.setattr(settings, "trust_proxy_headers", True)
+    monkeypatch.setattr(settings, "forwarded_allow_ips", "*")
+
+    db = SessionLocal()
+    try:
+        with pytest.raises(RuntimeError, match="FORWARDED_ALLOW_IPS"):
+            _startup_guardrails_and_cleanup(db)
+
+        monkeypatch.setattr(settings, "forwarded_allow_ips", "127.0.0.1,172.16.0.0/12")
+        _startup_guardrails_and_cleanup(db)
+    finally:
+        db.close()

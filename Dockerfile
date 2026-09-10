@@ -23,4 +23,9 @@ COPY static ./static
 COPY data ./data
 
 EXPOSE 8000
-CMD ["sh", "-c", "if [ \"${TRUST_PROXY_HEADERS:-false}\" = \"true\" ] || [ \"${TRUST_PROXY_HEADERS:-false}\" = \"1\" ]; then exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'; else exec uvicorn app.main:app --host 0.0.0.0 --port 8000; fi"]
+# Only the reverse proxy's own address may set X-Forwarded-*; with '*' any
+# client could spoof its address, which lands in the audit log and would defeat
+# rate limiting. Override FORWARDED_ALLOW_IPS if the proxy sits elsewhere.
+ENV FORWARDED_ALLOW_IPS="127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+
+CMD ["sh", "-c", "if [ \"${TRUST_PROXY_HEADERS:-false}\" = \"true\" ] || [ \"${TRUST_PROXY_HEADERS:-false}\" = \"1\" ]; then exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips=\"${FORWARDED_ALLOW_IPS}\"; else exec uvicorn app.main:app --host 0.0.0.0 --port 8000; fi"]

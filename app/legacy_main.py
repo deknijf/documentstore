@@ -117,6 +117,12 @@ from app.services.bank_aggregator import BankAggregatorClient
 from app.services.bank_import import parse_imported_transactions
 from app.services.mail_ingest import ingest_mail_pdfs
 from app.services.pipeline import process_document
+from app.services.rate_limit import (
+    LOGIN_ACCOUNT_FAILURE_LIMIT,
+    LOGIN_ACCOUNT_FAILURE_WINDOW,
+    account_key,
+    limiter,
+)
 from app.services.audit import audit_log
 
 app = FastAPI(title=settings.app_name)
@@ -133,6 +139,10 @@ MAIL_INGEST_THREAD: Thread | None = None
 DOCUMENT_JOB_STOP_EVENT = Event()
 DOCUMENT_JOB_THREAD: Thread | None = None
 GROUPS_ENABLED = False
+BUDGET_LABEL_JOB_TYPE = "budget-label-backfill"
+# How long to wait before re-running the backfill for a tenant, so a polled
+# read endpoint cannot re-queue it every few seconds.
+BUDGET_LABEL_BACKFILL_COOLDOWN_MINUTES = 30
 ANDROID_APK_RELATIVE_PATH = "mobile/docstore-mobile-latest.apk"
 ANDROID_APK_STATIC_PATH = Path("static") / ANDROID_APK_RELATIVE_PATH
 
@@ -391,6 +401,73 @@ def _find_running_async_job_db(db: Session, *, tenant_id: str, job_type: str) ->
     return _async_job_to_dict(row) if row else None
 
 
+def _recent_async_job_exists(db: Session, *, tenant_id: str, job_type: str, within_minutes: int) -> bool:
+    cutoff = datetime.utcnow() - timedelta(minutes=max(1, int(within_minutes)))
+    return (
+        db.query(AsyncJob.id)
+        .filter(
+            AsyncJob.tenant_id == tenant_id,
+            AsyncJob.job_type == job_type,
+            or_(AsyncJob.status.in_(["queued", "running"]), AsyncJob.finished_at >= cutoff),
+        )
+        .first()
+        is not None
+    )
+
+
+def _enqueue_budget_label_backfill(db: Session, *, tenant_id: str, user_id: str) -> None:
+    """Assign budget labels that need an LLM call, off the request path.
+
+    GET /api/documents is polled by every open browser tab, so it must never
+    trigger a provider call itself.
+    """
+    if _recent_async_job_exists(
+        db,
+        tenant_id=tenant_id,
+        job_type=BUDGET_LABEL_JOB_TYPE,
+        within_minutes=BUDGET_LABEL_BACKFILL_COOLDOWN_MINUTES,
+    ):
+        return
+    job_id = _create_async_job_db(db, job_type=BUDGET_LABEL_JOB_TYPE, tenant_id=tenant_id, user_id=user_id)
+
+    def _worker(progress_cb):
+        from app.services.pipeline import _apply_bank_mapping_labels
+
+        worker_db = SessionLocal()
+        try:
+            rows = (
+                worker_db.query(Document)
+                .filter(
+                    Document.tenant_id == tenant_id,
+                    Document.deleted_at.is_(None),
+                    Document.status == "ready",
+                    Document.ocr_text.is_not(None),
+                    or_(Document.budget_category.is_(None), Document.budget_category == ""),
+                )
+                .all()
+            )
+            total = len(rows)
+            progress_cb(0, total)
+            labeled = 0
+            for index, doc in enumerate(rows):
+                ocr_text = str(getattr(doc, "ocr_text", "") or "").strip()
+                if ocr_text:
+                    try:
+                        _apply_bank_mapping_labels(worker_db, doc=doc, ocr_text=ocr_text)
+                        _ensure_doc_single_label(worker_db, doc)
+                        worker_db.commit()
+                        if str(getattr(doc, "budget_category", "") or "").strip():
+                            labeled += 1
+                    except Exception:
+                        worker_db.rollback()
+                progress_cb(index + 1, total)
+            return {"total": total, "labeled": labeled}
+        finally:
+            worker_db.close()
+
+    _start_async_job(job_id, _worker)
+
+
 def _startup_guardrails_and_cleanup(db: Session) -> None:
     # Production guardrails: fail fast if critical settings are unsafe.
     if str(settings.environment or "").strip().lower() == "production":
@@ -398,6 +475,11 @@ def _startup_guardrails_and_cleanup(db: Session) -> None:
             raise RuntimeError("ALLOWED_HOSTS is verplicht in productie")
         if str(settings.integration_master_key or "").strip() in {"", "change-this-in-production"}:
             raise RuntimeError("INTEGRATION_MASTER_KEY moet aangepast worden in productie")
+        if settings.trust_proxy_headers and str(settings.forwarded_allow_ips or "").strip() == "*":
+            raise RuntimeError(
+                "FORWARDED_ALLOW_IPS mag geen '*' zijn in productie: elke client kan dan "
+                "zijn eigen IP vervalsen in audit logs en rate limiting omzeilen"
+            )
 
     # If the process restarted, in-process jobs are lost.
     # Resume document processing jobs from queue; fail all other running jobs.
@@ -1174,9 +1256,11 @@ def _ensure_bank_category_labels(db: Session, tenant_id: str) -> None:
     if not cats:
         return
 
+    # Labels are tenant-wide; uq_labels_tenant_normname enforces one canonical
+    # name per tenant regardless of group.
     existing = {
         (str(l.name or "").strip().lower()): l
-        for l in db.query(Label).filter(Label.tenant_id == tenant_id, Label.group_id == group_id).all()
+        for l in db.query(Label).filter(Label.tenant_id == tenant_id).all()
     }
     created = 0
     for cat in sorted(set(cats), key=lambda x: x.lower()):
@@ -1202,7 +1286,6 @@ def _ensure_doc_has_label(db: Session, doc: Document, label_name: str) -> None:
         db.query(Label)
         .filter(
             Label.tenant_id == doc.tenant_id,
-            Label.group_id == group_id,
             func.lower(func.trim(Label.name)) == label_name.lower(),
         )
         .first()
@@ -1241,7 +1324,6 @@ def _ensure_doc_single_label(db: Session, doc: Document) -> bool:
         db.query(Label)
         .filter(
             Label.tenant_id == doc.tenant_id,
-            Label.group_id == group_id,
             func.lower(func.trim(Label.name)) == target.lower(),
         )
         .first()
@@ -1252,36 +1334,15 @@ def _ensure_doc_single_label(db: Session, doc: Document) -> bool:
         db.commit()
         db.refresh(label)
 
-    target_label_id = str(label.id)
-    try:
-        # ORM sometimes doesn't remove association rows reliably for older DBs; do it explicitly.
-        db.execute(
-            text(
-                """
-                DELETE FROM document_labels
-                WHERE document_id = :doc_id AND label_id != :label_id
-                """
-            ),
-            {"doc_id": str(doc.id), "label_id": target_label_id},
-        )
-        db.execute(
-            text(
-                """
-                INSERT OR IGNORE INTO document_labels(document_id, label_id)
-                VALUES (:doc_id, :label_id)
-                """
-            ),
-            {"doc_id": str(doc.id), "label_id": target_label_id},
-        )
-        # Ensure the ORM doesn't try to delete already-deleted association rows.
-        db.expire(doc, ["labels"])
-        return True
-    except Exception:
-        # Fallback to ORM relationship assignment only (may fail on older DBs).
-        if len(existing) != 1 or (existing and str(existing[0].id) != target_label_id):
-            doc.labels = [label]
-            return True
-    return False
+    # Keep this on one mechanism. Mixing an ORM collection change with raw
+    # INSERT/DELETE on document_labels made the ORM re-insert a row the raw
+    # statement had just written, which failed the unique constraint and rolled
+    # back the whole surrounding transaction, silently discarding the labels.
+    current = list(doc.labels or [])
+    if len(current) == 1 and str(current[0].id) == str(label.id):
+        return False
+    doc.labels = [label]
+    return True
 
 
 def _extract_csv_import_meta(raw_json: str | None) -> dict[str, str]:
@@ -2226,8 +2287,29 @@ def health() -> dict:
 def login(payload: LoginIn, request: Request, db: Session = Depends(get_db)):
     request_ip = str(getattr(getattr(request, "client", None), "host", "") or "") or None
     request_agent = str(request.headers.get("user-agent") or "") or None
+
+    # Only failed attempts consume this budget, and it is generous, so a third
+    # party cannot lock a real user out of their own account.
+    failure_budget = account_key(payload.email)
+    if settings.rate_limit_enabled and limiter.retry_after(
+        failure_budget,
+        limit=LOGIN_ACCOUNT_FAILURE_LIMIT,
+        window_seconds=LOGIN_ACCOUNT_FAILURE_WINDOW,
+        register=False,
+    ):
+        raise HTTPException(
+            status_code=429,
+            detail="Te veel mislukte loginpogingen voor dit account. Probeer het later opnieuw.",
+        )
+
     user = db.query(User).filter(User.email == payload.email).first()
     if not user or not verify_password(payload.password, user.password_hash):
+        if settings.rate_limit_enabled:
+            limiter.retry_after(
+                failure_budget,
+                limit=LOGIN_ACCOUNT_FAILURE_LIMIT,
+                window_seconds=LOGIN_ACCOUNT_FAILURE_WINDOW,
+            )
         try:
             audit_log(
                 db,
@@ -4936,6 +5018,9 @@ def list_documents(
         db.rollback()
 
     # Backfill document budget labels (MAP/AI) for older docs that were processed before this feature existed.
+    # Only the cheap keyword mapping runs here: this endpoint is polled every few
+    # seconds by every open browser tab, so it must not call a provider.
+    needs_llm_backfill = False
     try:
         from app.services.pipeline import _apply_bank_mapping_labels as _apply_doc_budget_labels
 
@@ -4950,9 +5035,11 @@ def list_documents(
             ocr_text = str(getattr(d, "ocr_text", "") or "").strip()
             if not ocr_text:
                 continue
-            _apply_doc_budget_labels(db, doc=d, ocr_text=ocr_text)
+            _apply_doc_budget_labels(db, doc=d, ocr_text=ocr_text, allow_llm=False)
             if str(getattr(d, "budget_category", "") or "").strip():
                 changed = True
+            else:
+                needs_llm_backfill = True
             # Enforce single label invariant.
             if _ensure_doc_single_label(db, d):
                 changed = True
@@ -4960,6 +5047,12 @@ def list_documents(
             db.commit()
     except Exception:
         db.rollback()
+
+    if needs_llm_backfill:
+        try:
+            _enqueue_budget_label_backfill(db, tenant_id=tenant_id, user_id=str(current_user.id))
+        except Exception:
+            db.rollback()
 
     return [document_to_out(d) for d in docs]
 

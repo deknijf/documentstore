@@ -39,6 +39,9 @@ os.environ.update(
         # A small cap keeps the oversize test fast; the shipped default is
         # asserted separately in test_uploads.py.
         "MAX_UPLOAD_MB": "2",
+        # Enabled per-test in test_rate_limit.py so one module cannot spend
+        # another module's budget.
+        "RATE_LIMIT_ENABLED": "false",
         # No test may reach an external provider.
         "AWS_ACCESS_KEY_ID": "",
         "AWS_SECRET_ACCESS_KEY": "",

@@ -479,10 +479,15 @@ def _ensure_doc_has_label(db: Session, *, doc: Document, label_name: str) -> Non
         doc.labels.append(label)
 
 
-def _apply_bank_mapping_labels(db: Session, *, doc: Document, ocr_text: str) -> None:
+def _apply_bank_mapping_labels(
+    db: Session, *, doc: Document, ocr_text: str, allow_llm: bool = True
+) -> None:
     """
     Best-effort label assignment based on Bank Settings keyword mappings.
-    This is intentionally cheap (no LLM): only keyword matching.
+    Keyword matching is cheap; falling back to the LLM is not.
+
+    Callers on a request path pass allow_llm=False so that only the cheap
+    keyword matching runs. The LLM fallback belongs in a background job.
     """
     tenant_id = str(doc.tenant_id or "").strip()
     if not tenant_id:
@@ -549,6 +554,11 @@ def _apply_bank_mapping_labels(db: Session, *, doc: Document, ocr_text: str) -> 
         )
         if label:
             doc.labels = [label]
+        return
+
+    if not allow_llm:
+        # Caller is serving a request; leave the LLM fallback to the job that
+        # backfills budget labels.
         return
 
     # If no mapping hit: keep existing manual/mapping label, otherwise infer with LLM (AI pill).
@@ -625,7 +635,10 @@ Regels:
                 group_id = str(getattr(doc, "group_id", "") or "").strip() or _ensure_tenant_default_group_id(db, tenant_id=tenant_id)
                 label = (
                     db.query(Label)
-                    .filter(Label.tenant_id == doc.tenant_id, Label.group_id == group_id, func.lower(Label.name) == cat.lower())
+                    .filter(
+                        Label.tenant_id == doc.tenant_id,
+                        func.lower(func.trim(Label.name)) == cat.lower(),
+                    )
                     .first()
                 )
                 if not label:
@@ -650,7 +663,10 @@ Regels:
         group_id = str(getattr(doc, "group_id", "") or "").strip() or _ensure_tenant_default_group_id(db, tenant_id=tenant_id)
         label = (
             db.query(Label)
-            .filter(Label.tenant_id == doc.tenant_id, Label.group_id == group_id, func.lower(Label.name) == fallback.lower())
+            .filter(
+                Label.tenant_id == doc.tenant_id,
+                func.lower(func.trim(Label.name)) == fallback.lower(),
+            )
             .first()
         )
         if not label:

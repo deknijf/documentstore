@@ -6,11 +6,40 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi import Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app import legacy_main
 from app.config import settings
+from app.services.rate_limit import caller_identity, client_ip, limiter, rule_for
 from app.routers import admin, audit, auth, bank, catalog, documents, health, jobs, search, thumbnails, views
+
+
+# The SPA loads one same-origin module script and no inline scripts, but it does
+# use two inline style attributes, Google Fonts, and blob:/data: URLs for the
+# document viewer and generated images.
+CONTENT_SECURITY_POLICY = "; ".join(
+    [
+        "default-src 'self'",
+        "script-src 'self'",
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+        "font-src 'self' https://fonts.gstatic.com",
+        "img-src 'self' data: blob:",
+        "frame-src 'self' blob:",
+        "connect-src 'self'",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+        "frame-ancestors 'self'",
+    ]
+)
+
+SECURITY_HEADERS = {
+    "Content-Security-Policy": CONTENT_SECURITY_POLICY,
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "SAMEORIGIN",
+    "Referrer-Policy": "no-referrer",
+    "Cross-Origin-Opener-Policy": "same-origin",
+}
 
 
 def _split_csv_env(value: str) -> list[str]:
@@ -76,6 +105,9 @@ if allowed_hosts or allowed_host_nets:
             return PlainTextResponse("Invalid host header", status_code=400)
         return await call_next(request)
 
+# The SPA is served from this same origin and the Android client does not use
+# CORS, so no origin needs it by default. Set CORS_ALLOW_ORIGINS only when a
+# frontend really is served from somewhere else.
 cors_origins = _split_csv_env(settings.cors_allow_origins)
 if cors_origins:
     app.add_middleware(
@@ -85,15 +117,37 @@ if cors_origins:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-else:
-    # Dev-friendly default: allow all origins, but without credentials.
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=False,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+
+
+@app.middleware("http")
+async def enforce_rate_limits(request: Request, call_next):
+    rule = rule_for(request.method, request.url.path) if settings.rate_limit_enabled else None
+    if rule:
+        bucket, limit, window = rule
+        identity = client_ip(request) if bucket == "auth" else caller_identity(request)
+        wait = limiter.retry_after(
+            f"{bucket}:{request.url.path}:{identity}", limit=limit, window_seconds=window
+        )
+        if wait:
+            return JSONResponse(
+                {"detail": "Te veel aanvragen. Probeer het later opnieuw."},
+                status_code=429,
+                headers={"Retry-After": str(wait)},
+            )
+    return await call_next(request)
+
+
+# Added last, so it wraps everything and also covers error responses.
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    for header, value in SECURITY_HEADERS.items():
+        response.headers.setdefault(header, value)
+    if settings.trust_proxy_headers or request.url.scheme == "https":
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+        )
+    return response
 
 
 # Routers

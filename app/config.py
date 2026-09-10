@@ -36,6 +36,13 @@ class Settings(BaseSettings):
     # When behind a reverse proxy (nginx/traefik/caddy), set true to trust
     # X-Forwarded-* headers (scheme/host/client ip).
     trust_proxy_headers: bool = False
+    # Addresses whose X-Forwarded-* headers are believed. Defaults to loopback
+    # plus the private ranges a reverse proxy or Docker gateway sits in, so a
+    # client on the public internet cannot spoof its own address. "*" trusts
+    # every peer and is refused in production.
+    forwarded_allow_ips: str = "127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+    # Rate limiting on authentication and expensive endpoints.
+    rate_limit_enabled: bool = True
 
     # Session / auth
     # Default 30 days.
