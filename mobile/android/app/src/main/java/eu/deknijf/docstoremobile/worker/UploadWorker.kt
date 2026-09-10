@@ -13,7 +13,10 @@ class UploadWorker(
     override suspend fun doWork(): Result {
         val container = (applicationContext as DocstoreApplication).container
         val token = container.sessionStore.tokenFlow.first().orEmpty()
-        if (token.isBlank()) return Result.retry()
+        // No session: there is nothing this run can do. Retrying would spin
+        // every fifteen minutes until the user logs in again; the periodic
+        // worker picks the queue back up once there is a token.
+        if (token.isBlank()) return Result.success()
 
         return container.uploadQueueRepository.processPendingUploads(token)
             .fold(

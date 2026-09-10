@@ -23,6 +23,9 @@ class UploadQueueRepository(
 ) {
     fun observeQueue(): Flow<List<PendingUploadEntity>> = dao.observeAll()
 
+    /** Puts every failed upload back in the queue; used by the retry button. */
+    suspend fun requeueFailedUploads(): Int = dao.requeueFailed(System.currentTimeMillis())
+
     fun observeSummary(): Flow<QueueSummary> = combine(
         dao.observePendingCount(),
         dao.observeFailedCount(),
@@ -65,7 +68,7 @@ class UploadQueueRepository(
     suspend fun processPendingUploads(token: String): Result<Int> {
         return runCatching {
             var uploaded = 0
-            dao.loadPendingForUpload().forEach { row ->
+            dao.loadPendingForUpload(MAX_UPLOAD_ATTEMPTS).forEach { row ->
                 val file = File(row.localPath)
                 if (!file.exists()) {
                     dao.updateStatus(
@@ -103,12 +106,20 @@ class UploadQueueRepository(
                     file.delete()
                     uploaded += 1
                 }.onFailure { ex ->
+                    val attempts = row.attemptCount + 1
+                    val reason = ex.message ?: "Upload mislukt"
                     dao.updateStatus(
                         id = row.id,
                         status = UploadStatus.FAILED,
-                        error = ex.message ?: "Upload mislukt",
+                        // Say so when the queue stops trying, otherwise the
+                        // upload just sits there and looks stuck.
+                        error = if (attempts >= MAX_UPLOAD_ATTEMPTS) {
+                            "$reason (gestopt na $attempts pogingen, gebruik Opnieuw proberen)"
+                        } else {
+                            reason
+                        },
                         updatedAt = System.currentTimeMillis(),
-                        attemptCount = row.attemptCount + 1,
+                        attemptCount = attempts,
                     )
                 }
             }
@@ -118,6 +129,15 @@ class UploadQueueRepository(
 
     suspend fun removeCompletedUpload(id: String) {
         dao.deleteById(id)
+    }
+
+    companion object {
+        /**
+         * After this many failures an upload is left alone until the user asks
+         * for a retry. Without a cap a rejected file kept the worker busy every
+         * fifteen minutes indefinitely.
+         */
+        const val MAX_UPLOAD_ATTEMPTS = 5
     }
 
     private fun guessMimeType(file: File): String {

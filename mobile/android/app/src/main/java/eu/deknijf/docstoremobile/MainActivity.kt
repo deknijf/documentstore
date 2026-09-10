@@ -131,8 +131,13 @@ class MainActivity : ComponentActivity() {
                                     }
                                 },
                                 onRetry = {
-                                    SyncScheduler.enqueueImmediate(applicationContext)
-                                    docsVm.refresh()
+                                    scope.launch {
+                                        // Uploads past the attempt cap are only
+                                        // picked up again when asked for.
+                                        container.uploadQueueRepository.requeueFailedUploads()
+                                        SyncScheduler.enqueueImmediate(applicationContext)
+                                        docsVm.refresh()
+                                    }
                                 },
                                 onScanDocument = { startNativeScan(ScanContinuationMode.REPLACE) },
                                 onImportFile = { importLauncher.launch(arrayOf("application/pdf", "image/*")) },

@@ -13,8 +13,25 @@ interface PendingUploadDao {
     @Query("SELECT * FROM pending_uploads ORDER BY createdAt DESC")
     fun observeAll(): Flow<List<PendingUploadEntity>>
 
-    @Query("SELECT * FROM pending_uploads WHERE status IN ('PENDING','FAILED') ORDER BY createdAt ASC")
-    suspend fun loadPendingForUpload(): List<PendingUploadEntity>
+    /**
+     * Rows the worker may still try. A permanently failing upload used to be
+     * retried every fifteen minutes forever, because FAILED was selected with
+     * no regard for how often it had already been attempted.
+     */
+    @Query(
+        "SELECT * FROM pending_uploads " +
+            "WHERE status = 'PENDING' OR (status = 'FAILED' AND attemptCount < :maxAttempts) " +
+            "ORDER BY createdAt ASC"
+    )
+    suspend fun loadPendingForUpload(maxAttempts: Int): List<PendingUploadEntity>
+
+
+    /** Puts every failed upload back in the queue, for the manual retry button. */
+    @Query(
+        "UPDATE pending_uploads SET status = 'PENDING', attemptCount = 0, lastError = NULL, " +
+            "updatedAt = :updatedAt WHERE status = 'FAILED'"
+    )
+    suspend fun requeueFailed(updatedAt: Long): Int
 
     @Query("SELECT COUNT(*) FROM pending_uploads WHERE status = 'PENDING'")
     fun observePendingCount(): Flow<Int>
