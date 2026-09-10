@@ -1801,6 +1801,66 @@ def _persist_bank_tx_classification(
     return updated
 
 
+def _store_budget_analysis_run(
+    db: Session,
+    *,
+    tenant_id: str,
+    source_hash: str,
+    provider: str,
+    model: str,
+    prompt_hash: str,
+    mappings_hash: str,
+    transactions_hash: str,
+    tx_count: int,
+    summary_points: list | None,
+) -> BankBudgetAnalysisRun:
+    """Store an analysis run, replacing an earlier one built from the same inputs.
+
+    source_hash is unique. A run whose summary records a provider failure is
+    deliberately not reused as a cache, so the next analysis recomputes and would
+    insert a second row for the same inputs. That violates the unique index and
+    turned every later analysis into a 500 until the transaction set changed.
+    Replacing the row instead also lets a poisoned run heal itself.
+    """
+    summary_json = json.dumps(summary_points or [], ensure_ascii=False)
+    run = (
+        db.query(BankBudgetAnalysisRun)
+        .filter(
+            BankBudgetAnalysisRun.tenant_id == tenant_id,
+            BankBudgetAnalysisRun.source_hash == source_hash,
+        )
+        .first()
+    )
+    if run:
+        db.query(BankBudgetAnalysisTx).filter(
+            BankBudgetAnalysisTx.tenant_id == tenant_id,
+            BankBudgetAnalysisTx.run_id == run.id,
+        ).delete()
+        run.provider = provider
+        run.model = model
+        run.prompt_hash = prompt_hash
+        run.mappings_hash = mappings_hash
+        run.transactions_hash = transactions_hash
+        run.tx_count = int(tx_count or 0)
+        run.summary_json = summary_json
+    else:
+        run = BankBudgetAnalysisRun(
+            tenant_id=tenant_id,
+            source_hash=source_hash,
+            provider=provider,
+            model=model,
+            prompt_hash=prompt_hash,
+            mappings_hash=mappings_hash,
+            transactions_hash=transactions_hash,
+            tx_count=int(tx_count or 0),
+            summary_json=summary_json,
+        )
+        db.add(run)
+    db.commit()
+    db.refresh(run)
+    return run
+
+
 def _hash_json(value: object) -> str:
     blob = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
@@ -4185,21 +4245,20 @@ def analyze_bank_budget(
     merged["transactions"] = _enrich_budget_transactions_with_doc_links(db, merged.get("transactions") or [])
     _persist_bank_tx_classification(db, tenant_id, merged.get("transactions") or [])
     _sync_budget_categories_to_mapping_settings(db, tenant_id, merged.get("transactions"))
-    run = BankBudgetAnalysisRun(
-        tenant_id=tenant_id,
-        source_hash=source_hash,
-        provider=provider,
-        model=model,
-        prompt_hash=prompt_hash,
-        mappings_hash=mappings_hash,
-        transactions_hash=tx_hash,
-        tx_count=len(tx_payload),
-        summary_json=json.dumps(merged.get("summary_points") or [], ensure_ascii=False),
-    )
+    run: BankBudgetAnalysisRun | None = None
     if not llm_failed:
-        db.add(run)
-        db.commit()
-        db.refresh(run)
+        run = _store_budget_analysis_run(
+            db,
+            tenant_id=tenant_id,
+            source_hash=source_hash,
+            provider=provider,
+            model=model,
+            prompt_hash=prompt_hash,
+            mappings_hash=mappings_hash,
+            transactions_hash=tx_hash,
+            tx_count=len(tx_payload),
+            summary_points=merged.get("summary_points"),
+        )
         for item in merged.get("transactions") or []:
             db.add(
                 BankBudgetAnalysisTx(
@@ -4570,7 +4629,8 @@ def refresh_bank_budget_from_mappings(
     merged["transactions"] = _enrich_budget_transactions_with_doc_links(db, merged.get("transactions") or [])
     _persist_bank_tx_classification(db, tenant_id, merged.get("transactions") or [])
     _sync_budget_categories_to_mapping_settings(db, tenant_id, merged.get("transactions"))
-    run = BankBudgetAnalysisRun(
+    run = _store_budget_analysis_run(
+        db,
         tenant_id=tenant_id,
         source_hash=source_hash,
         provider="mapping-refresh",
@@ -4579,11 +4639,8 @@ def refresh_bank_budget_from_mappings(
         mappings_hash=mappings_hash,
         transactions_hash=tx_hash,
         tx_count=len(tx_payload),
-        summary_json=json.dumps(merged.get("summary_points") or [], ensure_ascii=False),
+        summary_points=merged.get("summary_points"),
     )
-    db.add(run)
-    db.commit()
-    db.refresh(run)
     for item in merged.get("transactions") or []:
         db.add(
             BankBudgetAnalysisTx(
