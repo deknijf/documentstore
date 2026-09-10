@@ -178,7 +178,16 @@ def analyze_budget_transactions_with_llm(
         )
 
     mapping_text = json.dumps(mappings or [], ensure_ascii=False)
-    category_text = ", ".join([str(c).strip() for c in (known_categories or []) if str(c).strip()]) or "(geen opgegeven categorieën)"
+    usable_categories = [str(c).strip() for c in (known_categories or []) if str(c).strip()]
+    category_text = ", ".join(usable_categories) or "(geen opgegeven categorieën)"
+    # Reusing the existing set is the point: a free choice here grows the
+    # category list on every run. The document prompt is already this strict.
+    category_rule = (
+        "- category MOET exact overeenkomen met een item uit de voorkeurscategorieen-lijst.\n"
+        "- Verzin geen nieuwe categorie. Past niets perfect, kies dan de best passende uit die lijst."
+        if usable_categories
+        else "- Gebruik een korte, herbruikbare categorienaam."
+    )
 
     policy_block = """
 Verplichte categorisatieregels:
@@ -225,7 +234,7 @@ Regels:
 - Voor elke transaction id moet exact 1 categorisatie bestaan.
 - flow=income bij positieve bedragen, flow=expense bij negatieve bedragen.
 - category moet altijd ingevuld zijn.
-- Gebruik bij voorkeur een categorie uit de voorkeurscategorieën-lijst.
+{category_rule}
 """
 
     def _build_summary_prompt(compact_rows: list[dict[str, Any]]) -> str:

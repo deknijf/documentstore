@@ -139,6 +139,19 @@ MAIL_INGEST_THREAD: Thread | None = None
 DOCUMENT_JOB_STOP_EVENT = Event()
 DOCUMENT_JOB_THREAD: Thread | None = None
 GROUPS_ENABLED = False
+# Categories the rule-based fallback can produce on its own. Anything outside
+# this set and the tenant's own categories is an LLM invention: usable for a
+# single run, but it must not silently become a permanent option.
+FALLBACK_BUDGET_CATEGORIES = frozenset(
+    {
+        "Loon",
+        "Terugbetalingen",
+        "Overige inkomsten",
+        "Kaartuitgaven (VISA/MASTERCARD)",
+        "Bankkosten",
+        "Overige uitgaven",
+    }
+)
 BUDGET_LABEL_JOB_TYPE = "budget-label-backfill"
 # How long to wait before re-running the backfill for a tenant, so a polled
 # read endpoint cannot re-queue it every few seconds.
@@ -1458,6 +1471,31 @@ def _tx_movement_type(tx: dict) -> str:
     return ""
 
 
+def _category_key(value: str | None) -> str:
+    """Normalise a category name the same way the database unique index does."""
+    return re.sub(r"\s+", " ", str(value or "")).strip().lower()
+
+
+def _manual_categories_for_tenant(db: Session, tenant_id: str) -> dict[str, str]:
+    """Hand-set categories per external transaction id.
+
+    A manual choice outranks every automatic source and has to survive
+    re-analysis, so it is read from the transaction table rather than from
+    whatever payload a caller happens to pass around.
+    """
+    rows = (
+        db.query(BankTransaction.external_transaction_id, BankTransaction.category)
+        .filter(
+            BankTransaction.tenant_id == tenant_id,
+            BankTransaction.manual_mapping.is_(True),
+            BankTransaction.category.is_not(None),
+            BankTransaction.category != "",
+        )
+        .all()
+    )
+    return {str(ext_id): str(category) for ext_id, category in rows if ext_id and category}
+
+
 def _mapping_category_for_tx(tx: dict, mappings: list[dict[str, str]], flow: str) -> str | None:
     movement_type = _tx_movement_type(tx)
     desc = f"{tx.get('counterparty_name') or ''} {tx.get('remittance_information') or ''} {movement_type}".lower()
@@ -1520,6 +1558,7 @@ def _build_budget_analysis_payload(
     llm_data: dict,
     mappings: list[dict[str, str]],
     preferred_categories: list[str] | None = None,
+    manual_categories: dict[str, str] | None = None,
 ) -> dict:
     category_rows: list[dict] = llm_data.get("transaction_categories") if isinstance(llm_data, dict) else []
     summary_points = llm_data.get("summary_points") if isinstance(llm_data, dict) else []
@@ -1539,6 +1578,14 @@ def _build_budget_analysis_payload(
             }
 
     analyzed_transactions: list[dict] = []
+    manual_by_id = {str(k): str(v) for k, v in (manual_categories or {}).items() if k and v}
+    # Maps a normalised name back to the tenant's own spelling, so "energie" and
+    # "Energie " do not end up as separate categories.
+    canonical_by_key = {
+        _category_key(name): str(name).strip()
+        for name in (preferred_categories or [])
+        if str(name).strip()
+    }
     preferred_set = {str(c).strip().lower() for c in (preferred_categories or []) if str(c).strip()}
     category_totals: dict[str, dict[str, float]] = {}
     year_totals: dict[str, dict[str, float]] = {}
@@ -1560,13 +1607,21 @@ def _build_budget_analysis_payload(
         llm_mapping = False
         manual_mapping = False
 
-        # Expliciete mapping (uit settings) is altijd prioriteit.
-        if direct_mapping:
+        manual_category = manual_by_id.get(ext_id)
+        if manual_category:
+            # Handmatig gezet: wint van elke automatische bron en blijft staan.
+            category = manual_category
+            source = "manual"
+            manual_mapping = True
+            reason = "Handmatig ingesteld door gebruiker"
+        elif direct_mapping:
+            # Expliciete mapping (uit settings) gaat voor op de inschatting.
             category = direct_mapping
             source = "mapping"
             auto_mapping = True
         elif category:
             # Niet-expliciet: LLM/inschatting-kanaal.
+            category = canonical_by_key.get(_category_key(category), category)
             source = "llm"
             llm_mapping = True
         else:
@@ -1669,7 +1724,7 @@ def _sync_budget_categories_to_mapping_settings(db: Session, tenant_id: str, ana
         .filter(BankCategoryMapping.tenant_id == tenant_id, BankCategoryMapping.is_active.is_(True))
         .all()
     )
-    existing_categories = {str(r.category or "").strip().lower() for r in existing_rows if str(r.category or "").strip()}
+    existing_categories = {_category_key(r.category) for r in existing_rows if str(r.category or "").strip()}
 
     max_priority = (
         db.query(func.max(BankCategoryMapping.priority))
@@ -1679,8 +1734,12 @@ def _sync_budget_categories_to_mapping_settings(db: Session, tenant_id: str, ana
     )
     created = 0
     for category, flows in discovered.items():
-        key = category.lower()
+        key = _category_key(category)
         if key in existing_categories:
+            continue
+        if category not in FALLBACK_BUDGET_CATEGORIES:
+            # Only categories the rules themselves produce may become permanent
+            # options; an LLM invention would otherwise grow the list forever.
             continue
         inferred_flow = "all" if len(flows) > 1 else next(iter(flows))
         max_priority += 1
@@ -3932,6 +3991,7 @@ def analyze_bank_budget(
     tx_payload = [bank_transaction_to_out(r) for r in rows]
     tx_payload = _enrich_budget_transactions_with_doc_links(db, tx_payload)
     tx_payload = _attach_budget_document_context(db, tx_payload)
+    manual_categories = _manual_categories_for_tenant(db, tenant_id)
     _set_budget_progress(
         progress_user_id,
         running=True,
@@ -4049,6 +4109,7 @@ def analyze_bank_budget(
                     },
                     mappings if isinstance(mappings, list) else [],
                     preferred_categories=preferred_categories,
+                    manual_categories=manual_categories,
                 )
                 merged["transactions"] = _enrich_budget_transactions_with_doc_links(db, merged.get("transactions") or [])
                 _persist_bank_tx_classification(db, tenant_id, merged.get("transactions") or [])
@@ -4077,6 +4138,9 @@ def analyze_bank_budget(
     llm_failed = False
     unresolved_payload: list[dict] = []
     for tx in tx_payload:
+        if str(tx.get("external_transaction_id") or "").strip() in manual_categories:
+            # Already decided by hand: no mapping, no LLM, no cost.
+            continue
         flow = "income" if float(tx.get("amount") or 0) >= 0 else "expense"
         if _mapping_category_for_tx(tx, mappings if isinstance(mappings, list) else [], flow):
             continue
@@ -4116,6 +4180,7 @@ def analyze_bank_budget(
         llm_data,
         mappings if isinstance(mappings, list) else [],
         preferred_categories=preferred_categories,
+        manual_categories=manual_categories,
     )
     merged["transactions"] = _enrich_budget_transactions_with_doc_links(db, merged.get("transactions") or [])
     _persist_bank_tx_classification(db, tenant_id, merged.get("transactions") or [])
@@ -4300,6 +4365,7 @@ def get_latest_bank_budget_analysis(
         for r in tx_rows
     ]
     transactions = _enrich_budget_transactions_with_doc_links(db, transactions)
+    manual_categories = _manual_categories_for_tenant(db, tenant_id)
     out_settings = settings_to_out(db, tenant_id=tenant_id)
     mappings = out_settings.get("bank_csv_mappings") if isinstance(out_settings, dict) else []
     prompt = str(out_settings.get("bank_csv_prompt") or "").strip() if isinstance(out_settings, dict) else ""
@@ -4322,6 +4388,7 @@ def get_latest_bank_budget_analysis(
         },
         mappings if isinstance(mappings, list) else [],
         preferred_categories=preferred_categories,
+        manual_categories=manual_categories,
     )
     merged["transactions"] = _enrich_budget_transactions_with_doc_links(db, merged.get("transactions") or [])
     return {
@@ -4354,6 +4421,7 @@ def refresh_bank_budget_from_mappings(
     tx_payload = [bank_transaction_to_out(r) for r in rows]
     tx_payload = _enrich_budget_transactions_with_doc_links(db, tx_payload)
     tx_payload = _attach_budget_document_context(db, tx_payload)
+    manual_categories = _manual_categories_for_tenant(db, tenant_id)
     csv_import_ids = sorted({str(r.csv_import_id) for r in rows if r.csv_import_id})
 
     out_settings = settings_to_out(db, tenant_id=tenant_id)
@@ -4444,6 +4512,7 @@ def refresh_bank_budget_from_mappings(
             },
             mappings if isinstance(mappings, list) else [],
             preferred_categories=preferred_categories,
+            manual_categories=manual_categories,
         )
         merged["transactions"] = _enrich_budget_transactions_with_doc_links(db, merged.get("transactions") or [])
         _persist_bank_tx_classification(db, tenant_id, merged.get("transactions") or [])
@@ -4496,6 +4565,7 @@ def refresh_bank_budget_from_mappings(
         },
         mappings if isinstance(mappings, list) else [],
         preferred_categories=preferred_categories,
+        manual_categories=manual_categories,
     )
     merged["transactions"] = _enrich_budget_transactions_with_doc_links(db, merged.get("transactions") or [])
     _persist_bank_tx_classification(db, tenant_id, merged.get("transactions") or [])
