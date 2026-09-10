@@ -69,6 +69,10 @@ class Settings(BaseSettings):
     # Rasterising those would replace crisp, selectable text with a JPEG.
     pdf_text_layer_enabled: bool = True
     pdf_text_layer_min_quality: float = 0.62
+    # Above this share of page area covered by images, a PDF is treated as a
+    # scan even when it carries a text layer. Measured on real invoices: genuine
+    # born-digital ones sit under 0.17, scans with an embedded OCR layer at 1.0.
+    pdf_text_layer_max_image_coverage: float = 0.5
     doc_preprocess_perspective_enabled: bool = True
     doc_preprocess_deskew_enabled: bool = True
     doc_preprocess_enhance_enabled: bool = True

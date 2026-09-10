@@ -4,7 +4,7 @@ from pathlib import Path
 
 from app.config import settings
 from app.models import Document
-from app.services.pdf_text import has_usable_text_layer
+from app.services.pdf_text import is_born_digital_pdf
 from app.services.document_conversion import (
     convert_pdf_file_to_optimized_pdf,
     convert_image_file_to_pdf,
@@ -62,11 +62,16 @@ def ensure_preprocessed_document(doc: Document, rebuild: bool = False) -> tuple[
         return current_path, current_type, False
 
     # A born-digital PDF never gets a raster derivative, not even one that was
-    # produced before this rule existed.
+    # produced before this rule existed. A scan that merely carries an embedded
+    # OCR layer is not born-digital and still goes through the pipeline.
     if (
         source_type == "application/pdf"
         and settings.pdf_text_layer_enabled
-        and has_usable_text_layer(source_path, min_quality=settings.pdf_text_layer_min_quality)
+        and is_born_digital_pdf(
+            source_path,
+            min_quality=settings.pdf_text_layer_min_quality,
+            max_image_coverage=settings.pdf_text_layer_max_image_coverage,
+        )
     ):
         return source_path, source_type, False
 

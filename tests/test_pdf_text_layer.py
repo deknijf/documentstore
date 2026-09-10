@@ -10,7 +10,7 @@ import pytest
 
 from app.config import settings
 from app.services.doc_preprocess import ensure_preprocessed_document
-from app.services.pdf_text import has_usable_text_layer
+from app.services.pdf_text import has_usable_text_layer, image_coverage, is_born_digital_pdf
 
 INVOICE_LINES = [
     "Energieleverancier BV, Voorbeeldstraat 12, 9000 Gent",
@@ -36,6 +36,28 @@ def _write_text_pdf(path: Path, *, pages: int = 1, text_pages: int | None = None
                 for line in INVOICE_LINES:
                     page.insert_text((50, y), line, fontsize=9)
                     y += 12
+    document.save(str(path))
+    document.close()
+    return path
+
+
+def _write_scan_with_ocr_layer(path: Path) -> Path:
+    """A full-page image with a text layer on top: what a scanner produces.
+
+    This is the case the text-layer check on its own gets wrong.
+    """
+    import fitz
+
+    from tests.conftest import TINY_JPEG
+
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_image(page.rect, stream=TINY_JPEG)
+    y = 60
+    for _ in range(4):
+        for line in INVOICE_LINES:
+            page.insert_text((50, y), line, fontsize=9)
+            y += 12
     document.save(str(path))
     document.close()
     return path
@@ -237,3 +259,84 @@ def test_processing_a_text_pdf_clears_a_stale_derivative(client, tenant_a, monke
     finally:
         db.close()
     assert not stale.exists(), "the unused derivative should be removed"
+
+
+def test_image_coverage_separates_scans_from_born_digital(tmp_path):
+    assert image_coverage(_write_text_pdf(tmp_path / "born.pdf")) == 0.0
+    assert image_coverage(_write_scan_with_ocr_layer(tmp_path / "scan.pdf")) > 0.9
+
+
+def test_an_unreadable_file_counts_as_a_scan(tmp_path):
+    broken = tmp_path / "broken.pdf"
+    broken.write_bytes(b"not a pdf at all")
+    assert image_coverage(broken) == 1.0
+
+
+def test_a_scan_with_an_embedded_ocr_layer_is_not_born_digital(tmp_path):
+    """Measured on real invoices: that embedded layer loses IBANs the scan
+    pipeline plus OCR does find, so these must keep going through it."""
+    pdf = _write_scan_with_ocr_layer(tmp_path / "scan.pdf")
+    assert has_usable_text_layer(pdf, min_quality=settings.pdf_text_layer_min_quality), (
+        "the text-layer check alone accepts this file, which is the trap"
+    )
+    assert not is_born_digital_pdf(
+        pdf,
+        min_quality=settings.pdf_text_layer_min_quality,
+        max_image_coverage=settings.pdf_text_layer_max_image_coverage,
+    )
+
+
+def test_a_scan_with_an_embedded_ocr_layer_is_still_rasterised(tmp_path):
+    pdf = _write_scan_with_ocr_layer(tmp_path / "scan.pdf")
+    doc = _Doc("scanlayer-1", pdf)
+    path, _, used_preprocessed = ensure_preprocessed_document(doc)
+    assert used_preprocessed is True, "a scan must keep the deskew/contrast pipeline"
+    assert Path(path) != pdf
+
+
+def test_a_logo_does_not_make_an_invoice_a_scan(tmp_path):
+    import fitz
+
+    from tests.conftest import TINY_JPEG
+
+    pdf = _write_text_pdf(tmp_path / "logo.pdf")
+    document = fitz.open(str(pdf))
+    page = document[0]
+    page.insert_image(fitz.Rect(40, 20, 140, 60), stream=TINY_JPEG)
+    document.saveIncr()
+    document.close()
+
+    assert image_coverage(pdf) < settings.pdf_text_layer_max_image_coverage
+    assert is_born_digital_pdf(
+        pdf,
+        min_quality=settings.pdf_text_layer_min_quality,
+        max_image_coverage=settings.pdf_text_layer_max_image_coverage,
+    )
+
+
+def test_the_coverage_threshold_is_configurable(tmp_path):
+    pdf = _write_scan_with_ocr_layer(tmp_path / "scan.pdf")
+    assert not is_born_digital_pdf(pdf, min_quality=0.62, max_image_coverage=0.5)
+    # Raising it above full coverage brings back the looser behaviour.
+    assert is_born_digital_pdf(pdf, min_quality=0.62, max_image_coverage=1.01)
+
+
+def test_image_coverage_never_exceeds_one_page(tmp_path):
+    """Three placements of the same full-page image are still one covered page.
+
+    Without a per-page cap this reports 300% and drags the average for a
+    multi-page document over the threshold, turning a text document into a scan.
+    """
+    import fitz
+
+    from tests.conftest import TINY_JPEG
+
+    document = fitz.open()
+    page = document.new_page()
+    for _ in range(3):
+        page.insert_image(page.rect, stream=TINY_JPEG)
+    pdf = tmp_path / "overlap.pdf"
+    document.save(str(pdf))
+    document.close()
+
+    assert image_coverage(pdf) <= 1.0
