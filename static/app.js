@@ -4175,10 +4175,15 @@ async function renderDocumentViewer(docId, contentType, variant = "viewer") {
     viewerObjectUrl = "";
   }
   const safeVariant = variant === "original" ? "original" : "viewer";
-  const accessToken = String(token || "").trim();
-  const directViewerUrl = `/files/${docId}?variant=${encodeURIComponent(safeVariant)}${
-    accessToken ? `&access_token=${encodeURIComponent(accessToken)}` : ""
-  }&ts=${Date.now()}`;
+  // The API hands out a signed, expiring URL: an <iframe> cannot send an
+  // Authorization header, and the session token must never sit in a query
+  // string where it would land in access logs and browser history.
+  const doc = activeDoc && String(activeDoc.id) === String(docId) ? activeDoc : null;
+  const directViewerUrl = safeVariant === "original" ? doc?.original_url : doc?.viewer_url;
+  if (!directViewerUrl) {
+    detailViewerWrap.innerHTML = "<p>Kon document niet laden.</p>";
+    return;
+  }
   const declaredType = String(contentType || "").toLowerCase();
   const isPdf = declaredType.includes("pdf");
   const isImage = !isPdf && declaredType.startsWith("image/");
@@ -5058,6 +5063,15 @@ async function setNewPassword() {
 }
 
 function logout() {
+  // Best-effort server-side revocation; the local session is cleared either way.
+  const revokedToken = String(token || "").trim();
+  if (revokedToken) {
+    fetch("/api/auth/logout", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${revokedToken}` },
+      keepalive: true,
+    }).catch(() => {});
+  }
   token = "";
   currentUser = null;
   tenants = [];

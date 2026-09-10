@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     # Session / auth
     # Default 30 days.
     session_ttl_days: int = 30
+    # Lifetime of signed file/thumbnail URLs handed out by the API.
+    file_url_ttl_seconds: int = 86400
+    # Hard cap on a single document upload.
+    max_upload_mb: int = 50
 
     data_dir: str = "data"
     uploads_dir: str = "data/uploads"

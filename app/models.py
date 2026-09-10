@@ -101,7 +101,10 @@ class SessionToken(Base):
 
     tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id"), nullable=False, index=True)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    token: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
+    # Holds sha256(raw token). The raw token is returned to the client once and
+    # never stored, so a database or backup leak yields no usable session.
+    # Column name kept as "token" so existing SQLite databases migrate in place.
+    token_hash: Mapped[str] = mapped_column("token", String(128), unique=True, nullable=False, index=True)
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)

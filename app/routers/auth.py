@@ -52,6 +52,13 @@ router.add_api_route(
 
 
 router.add_api_route(
+    "/api/auth/logout",
+    legacy_main.logout_api,
+    methods=["POST"],
+)
+
+
+router.add_api_route(
     "/api/auth/switch-tenant",
     legacy_main.switch_tenant,
     methods=["POST"],

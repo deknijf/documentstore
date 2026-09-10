@@ -9,4 +9,4 @@ __version__ = str(os.getenv("APP_VERSION") or os.getenv("VERSION") or "0.6.7").s
 
 # Database schema version (integer, increment only when DB schema/migration logic changes).
 # This is stored in the DB to support safe upgrades.
-__db_schema_version__ = 3
+__db_schema_version__ = 4

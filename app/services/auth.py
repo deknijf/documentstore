@@ -15,6 +15,10 @@ ROLE_ADMIN = "admin"
 ROLE_USER = "gebruiker"
 
 
+def hash_session_token(raw_token: str) -> str:
+    return hashlib.sha256(str(raw_token or "").encode("utf-8")).hexdigest()
+
+
 def hash_password(password: str) -> str:
     salt = os.urandom(16)
     iterations = 200000
@@ -37,7 +41,14 @@ def verify_password(password: str, password_hash: str) -> bool:
 def issue_token(db: Session, user: User) -> str:
     token = f"tok_{uuid.uuid4().hex}{uuid.uuid4().hex}"
     expires_at = datetime.utcnow() + timedelta(days=max(1, int(getattr(settings, "session_ttl_days", 30) or 30)))
-    db.add(SessionToken(token=token, user_id=user.id, tenant_id=user.tenant_id, expires_at=expires_at))
+    db.add(
+        SessionToken(
+            token_hash=hash_session_token(token),
+            user_id=user.id,
+            tenant_id=user.tenant_id,
+            expires_at=expires_at,
+        )
+    )
     db.commit()
     return token
 
@@ -96,7 +107,7 @@ def extract_bearer_token(authorization: str | None) -> str:
 
 def get_current_user(db: Session, authorization: str | None) -> User:
     token = extract_bearer_token(authorization)
-    session_token = db.query(SessionToken).filter(SessionToken.token == token).first()
+    session_token = db.query(SessionToken).filter(SessionToken.token_hash == hash_session_token(token)).first()
     if not session_token:
         raise HTTPException(status_code=401, detail="Ongeldige sessie")
     if getattr(session_token, "expires_at", None) is not None:
@@ -116,7 +127,6 @@ def get_current_user(db: Session, authorization: str | None) -> User:
         raise HTTPException(status_code=401, detail="Ongeldige sessie")
     user.active_tenant_id = session_tenant or user_tenant
     user.session_token_id = getattr(session_token, "id", None)
-    user.session_token_value = getattr(session_token, "token", None)
     return user
 
 

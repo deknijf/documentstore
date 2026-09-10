@@ -92,6 +92,7 @@ from app.services.auth import (
     extract_bearer_token,
     get_current_user,
     group_to_out,
+    hash_session_token,
     issue_token,
     require_admin_access,
     require_bootstrap_admin,
@@ -103,7 +104,14 @@ from app.services.auth import (
     verify_password,
 )
 from app.services.bank_budget_ai import analyze_budget_transactions_with_llm, match_document_payment_with_llm
-from app.services.file_service import allowed_avatar_content_type, allowed_content_type, ensure_dirs
+from app.services.file_service import (
+    allowed_avatar_content_type,
+    allowed_content_type,
+    ensure_dirs,
+    extension_for_content_type,
+    sniff_content_type,
+)
+from app.services.file_tokens import SCOPE_FILE, SCOPE_THUMBNAIL, signed_query, verify as verify_file_signature
 from app.services.integration_settings import get_runtime_settings, settings_to_out, update_settings
 from app.services.bank_aggregator import BankAggregatorClient
 from app.services.bank_import import parse_imported_transactions
@@ -888,7 +896,7 @@ def _apply_user_role(
 
 def _current_session_token(db: Session, authorization: str | None) -> SessionToken:
     raw = extract_bearer_token(authorization)
-    row = db.query(SessionToken).filter(SessionToken.token == raw).first()
+    row = db.query(SessionToken).filter(SessionToken.token_hash == hash_session_token(raw)).first()
     if not row:
         raise HTTPException(status_code=401, detail="Ongeldige sessie")
     return row
@@ -1021,6 +1029,21 @@ def document_to_out(doc: Document) -> dict:
     ]
     preprocessed_path = str(getattr(doc, "preprocessed_file_path", "") or "").strip()
     has_preprocessed = bool(preprocessed_path and Path(preprocessed_path).exists())
+    # Artifact URLs are signed so <img>/<iframe> can load them without either an
+    # unauthenticated static mount or the session token in the query string.
+    # "v" only busts the browser cache when the document actually changed.
+    file_version = int(doc.updated_at.timestamp()) if getattr(doc, "updated_at", None) else 0
+    thumbnail_url = (
+        f"{doc.thumbnail_path}?{signed_query(SCOPE_THUMBNAIL, str(doc.id))}"
+        if doc.thumbnail_path
+        else None
+    )
+    viewer_url = (
+        f"/files/{doc.id}?variant=viewer&{signed_query(SCOPE_FILE, str(doc.id), 'viewer')}&v={file_version}"
+    )
+    original_url = (
+        f"/files/{doc.id}?variant=original&{signed_query(SCOPE_FILE, str(doc.id), 'original')}&v={file_version}"
+    )
     return {
         "id": doc.id,
         "filename": doc.filename,
@@ -1028,7 +1051,9 @@ def document_to_out(doc: Document) -> dict:
         "has_preprocessed": has_preprocessed,
         "original_content_type": getattr(doc, "original_content_type", None),
         "preprocessed_content_type": getattr(doc, "preprocessed_content_type", None),
-        "thumbnail_path": doc.thumbnail_path,
+        "thumbnail_path": thumbnail_url,
+        "viewer_url": viewer_url,
+        "original_url": original_url,
         "group_id": doc.group_id,
         "status": doc.status,
         "error_message": doc.error_message,
@@ -1689,6 +1714,35 @@ def _document_content_sha256(data: bytes) -> str:
     return hashlib.sha256(data or b"").hexdigest()
 
 
+def _max_upload_bytes() -> int:
+    return max(1, int(getattr(settings, "max_upload_mb", 50) or 50)) * 1024 * 1024
+
+
+async def _read_upload_capped(
+    file: UploadFile,
+    max_bytes: int,
+    *,
+    detail: str | None = None,
+    status_code: int = 413,
+) -> bytes:
+    # Read in chunks so an oversized upload is rejected while streaming, instead
+    # of being fully buffered in memory or spooled to disk first.
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(
+                status_code=status_code,
+                detail=detail or f"Bestand is te groot (max {max_bytes // (1024 * 1024)}MB)",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 def _tx_dedupe_hash_from_payload(payload: dict) -> str:
     key = {
         "booking_date": str(payload.get("booking_date") or "").strip(),
@@ -2033,14 +2087,16 @@ def _attach_budget_document_context(db: Session, transactions: list[dict]) -> li
 
 
 def ensure_doc_access(doc: Document | None, current_user: User, allow_deleted: bool = False) -> Document:
+    # A document outside the caller's tenant must look exactly like a document
+    # that does not exist; a 403 here would confirm the id to another tenant.
     if not doc:
         raise HTTPException(status_code=404, detail="Document niet gevonden")
     if str(getattr(doc, "tenant_id", "") or "") != _tenant_id_for_user(current_user):
-        raise HTTPException(status_code=403, detail="Geen toegang")
+        raise HTTPException(status_code=404, detail="Document niet gevonden")
     if not allow_deleted and doc.deleted_at is not None:
         raise HTTPException(status_code=404, detail="Document niet gevonden")
     if not _current_user_can_see_all_groups(current_user) and doc.group_id not in user_group_ids(current_user):
-        raise HTTPException(status_code=403, detail="Geen toegang")
+        raise HTTPException(status_code=404, detail="Document niet gevonden")
     return doc
 
 
@@ -2168,8 +2224,25 @@ def health() -> dict:
 
 @app.post("/api/auth/login", response_model=AuthOut)
 def login(payload: LoginIn, request: Request, db: Session = Depends(get_db)):
+    request_ip = str(getattr(getattr(request, "client", None), "host", "") or "") or None
+    request_agent = str(request.headers.get("user-agent") or "") or None
     user = db.query(User).filter(User.email == payload.email).first()
     if not user or not verify_password(payload.password, user.password_hash):
+        try:
+            audit_log(
+                db,
+                tenant_id=str(getattr(user, "tenant_id", "") or "") or get_default_tenant_id(),
+                user_id=str(user.id) if user else None,
+                action="auth.login_failed",
+                entity_type="user",
+                entity_id=str(user.id) if user else None,
+                details={"email": str(payload.email or "")[:255]},
+                ip=request_ip,
+                user_agent=request_agent,
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
         raise HTTPException(status_code=401, detail="Ongeldige login")
     token = issue_token(db, user)
     try:
@@ -2181,8 +2254,8 @@ def login(payload: LoginIn, request: Request, db: Session = Depends(get_db)):
             entity_type="user",
             entity_id=str(user.id),
             details={"email": str(user.email or "")},
-            ip=str(getattr(getattr(request, "client", None), "host", "") or "") or None,
-            user_agent=str(request.headers.get("user-agent") or "") or None,
+            ip=request_ip,
+            user_agent=request_agent,
         )
         db.commit()
     except Exception:
@@ -2395,9 +2468,12 @@ async def upload_my_avatar(
         ext = ".jpg"
     avatar_name = f"{current_user.id}_{uuid.uuid4().hex}{ext}"
     avatar_fs_path = Path(settings.avatars_dir) / avatar_name
-    content = await file.read()
-    if len(content) > 5 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="Avatar is te groot (max 5MB)")
+    content = await _read_upload_capped(
+        file,
+        5 * 1024 * 1024,
+        detail="Avatar is te groot (max 5MB)",
+        status_code=400,
+    )
     avatar_fs_path.write_bytes(content)
 
     old_avatar = (current_user.avatar_path or "").strip()
@@ -3550,7 +3626,7 @@ async def import_bank_transactions(
     account = db.query(BankAccount).filter(BankAccount.id == account_id, BankAccount.tenant_id == tenant_id).first()
     if not account:
         raise HTTPException(status_code=404, detail="Rekening niet gevonden")
-    content = await file.read()
+    content = await _read_upload_capped(file, _max_upload_bytes())
     if not content:
         raise HTTPException(status_code=400, detail="Bestand is leeg")
 
@@ -3612,7 +3688,7 @@ async def import_bank_csv(
     filename = (file.filename or "").strip().lower()
     if not filename.endswith(".csv"):
         raise HTTPException(status_code=400, detail="Enkel .csv bestanden zijn toegestaan")
-    content = await file.read()
+    content = await _read_upload_capped(file, _max_upload_bytes())
     if not content:
         raise HTTPException(status_code=400, detail="Bestand is leeg")
 
@@ -4604,13 +4680,18 @@ async def upload_document(
             db.flush()
         auto_group_id = grp.id
 
-    data = await file.read()
+    data = await _read_upload_capped(file, _max_upload_bytes())
+    # The declared multipart type is client-controlled, so the stored type and
+    # the storage extension are derived from the file's own bytes instead.
+    sniffed_content_type = sniff_content_type(data)
+    if not sniffed_content_type or not allowed_content_type(sniffed_content_type):
+        raise HTTPException(status_code=400, detail="Unsupported bestandstype")
     content_sha256 = _document_content_sha256(data)
-    original_content_type = str(file.content_type or "")
+    original_content_type = sniffed_content_type
     original_filename = file.filename or "document"
 
     document_id = str(uuid.uuid4())
-    original_ext = Path(original_filename).suffix or ".bin"
+    original_ext = extension_for_content_type(sniffed_content_type)
     original_storage_name = f"{document_id}_original{original_ext}"
     original_file_path = Path(settings.uploads_dir) / original_storage_name
     file_path = original_file_path
@@ -5597,20 +5678,25 @@ def search_documents(
 def download_original(
     document_id: str,
     variant: str = Query(default="default"),
-    access_token: str | None = Query(default=None),
+    exp: str | None = Query(default=None),
+    sig: str | None = Query(default=None),
     db: Session = Depends(get_db),
     authorization: str | None = Header(default=None),
 ):
-    auth_header = authorization
-    if not auth_header and access_token:
-        auth_header = f"Bearer {str(access_token).strip()}"
-    current_user = get_current_user(db, auth_header)
-    doc = ensure_doc_access(db.get(Document, document_id), current_user)
+    requested_variant = str(variant or "").strip().lower()
+    # The detail viewer embeds this URL in an <iframe>/<a>, which cannot send an
+    # Authorization header. A signed URL from the API stands in for it; every
+    # other caller still authenticates with a Bearer token.
+    if verify_file_signature(SCOPE_FILE, str(document_id), requested_variant, exp, sig):
+        doc = db.get(Document, document_id)
+        if not doc or doc.deleted_at is not None:
+            raise HTTPException(status_code=404, detail="Document niet gevonden")
+    else:
+        current_user = get_current_user(db, authorization)
+        doc = ensure_doc_access(db.get(Document, document_id), current_user)
     selected_path = str(getattr(doc, "file_path", "") or "").strip()
     selected_type = str(getattr(doc, "content_type", "") or "").strip() or None
     selected_name = str(getattr(doc, "filename", "") or "").strip() or f"{document_id}.bin"
-
-    requested_variant = str(variant or "").strip().lower()
 
     # Explicit original variant: always try original artifact first.
     if requested_variant == "original":
@@ -5653,7 +5739,8 @@ def download_original(
 Path(settings.thumbnails_dir).mkdir(parents=True, exist_ok=True)
 Path(settings.uploads_dir).mkdir(parents=True, exist_ok=True)
 Path(settings.avatars_dir).mkdir(parents=True, exist_ok=True)
-app.mount("/thumbnails", StaticFiles(directory=settings.thumbnails_dir), name="thumbnails")
-app.mount("/uploads", StaticFiles(directory=settings.uploads_dir), name="uploads")
+# Thumbnails are served by app/routers/thumbnails.py behind a signed URL, and
+# original uploads only through /files/{document_id}; neither gets a static
+# mount. See app/main.py for the mounts that are actually served.
 app.mount("/avatars", StaticFiles(directory=settings.avatars_dir), name="avatars")
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

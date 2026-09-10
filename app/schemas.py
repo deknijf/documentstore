@@ -11,6 +11,8 @@ class DocumentOut(BaseModel):
     original_content_type: str | None = None
     preprocessed_content_type: str | None = None
     thumbnail_path: str | None
+    viewer_url: str | None = None
+    original_url: str | None = None
     group_id: str | None
     status: str
     error_message: str | None

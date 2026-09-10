@@ -199,3 +199,75 @@ This file defines a reusable, framework-agnostic engineering baseline for buildi
 - No cross-tenant data leakage.
 - No schema drift outside migrations.
 - No production release without passing CI + migration safety.
+
+## 19. Docstore Project Addendum
+
+This repository is a tenant-scoped document and bank-record application. Read
+`skills/docstore/SKILL.md` before making non-trivial changes; it contains the
+operational workflow and project-specific invariants.
+
+### Application shape
+
+- HTTP entrypoint: `app/main.py`; routers are under `app/routers/`.
+- A significant part of the established API implementation remains in
+  `app/legacy_main.py`. Keep route contracts stable and move new reusable
+  domain logic to `app/services/` rather than increasing route complexity.
+- Persistence is SQLite under `data/`; uploaded files, preprocessed files and
+  thumbnails are durable tenant data and must never be removed by a code
+  deploy.
+- The browser client is a static SPA in `static/`. The Android client lives in
+  `mobile/android/` and is intentionally focused on scan/upload reliability.
+
+### Current authorization model
+
+- Every document, CSV import, bank transaction, integration setting, label,
+  category and async job is tenant-scoped. Filter by the active tenant on every
+  read and write, including file-serving and background jobs.
+- Roles are `superadmin`, `admin` and `gebruiker`. A `superadmin` may operate
+  across tenants; an `admin` only manages its own tenant; a `gebruiker` has no
+  Admin section but may manage tenant documents and view Budget.
+- Group-based document partitioning is deliberately disabled
+  (`GROUPS_ENABLED = False`). Users in one tenant currently see the same
+  tenant documents. Do not revive group filtering without an explicit product
+  decision and a complete authorization audit.
+
+### Durable processing rules
+
+- Preserve the original upload. Any PDF conversion or preprocessing is a
+  derivative, never a replacement.
+- Generate thumbnails from the original file. A preprocessing change must not
+  silently alter thumbnail orientation or document evidence.
+- OCR, AI extraction, thumbnail creation, bank checks and budget analysis are
+  asynchronous, idempotent jobs. Persist state/progress in `async_jobs`; do
+  not turn them into request-bound work.
+- Keep OCR text searchable and keep extraction provenance/confidence. User
+  confirmation and corrections are training hints, not silent overwrites.
+- Document and CSV imports require binary de-duplication. Document semantic
+  duplicates require an explicit keep/delete decision; CSV imports must never
+  create duplicate transactions.
+
+### Bank and categorization rules
+
+- Bank category mappings are tenant configuration and survive CSV deletion.
+- A transaction category has explicit provenance: `manual_mapping`,
+  `auto_mapping` (configured mapping), or `llm_mapping`. Preserve manual
+  choices and do not erase AI provenance during normal refreshes.
+- Normalize category/label names with trim plus case-insensitive comparison.
+  One canonical category or label name may exist per tenant.
+- A `PAID` document marker is reserved for a bank-validated payment, never
+  merely for a receipt category or a manually ticked paid flag.
+
+### Release and runtime rules
+
+- `VERSION` is the local source for `APP_VERSION` and `GIT_TAG`; releases use
+  semantic git tags (`vMAJOR.MINOR.PATCH`). Keep source fallbacks, container
+  metadata and Android `versionCode` in sync.
+- Every database schema change increments `app.__db_schema_version__` and adds
+  an idempotent migration in `app/db.py`. Validate an upgrade using an existing
+  `data/documentstore.db`, not only an empty database.
+- `.env` is local/production-only; `.env.example` must list every supported
+  non-secret configuration key. Never add actual credentials, keystores or APK
+  artifacts to git.
+- Tag releases build `deknijf/docstore:<git-tag>` and package the Android APK.
+  Production Android upgrades require the stable GitHub signing secrets; an
+  ephemeral signing key is only acceptable for non-upgrade test builds.

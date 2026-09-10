@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import hashlib
 import json
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
@@ -110,11 +111,30 @@ def _apply_pending_migrations(conn) -> None:
         if not _column_exists(c, "documents", "preprocessed_content_type"):
             c.execute(text("ALTER TABLE documents ADD COLUMN preprocessed_content_type VARCHAR(128)"))
 
+    def _migration_v4(c) -> None:
+        # Store sha256 of the session token instead of the token itself, so a
+        # database or backup leak cannot be replayed as a live session.
+        # Existing rows are rehashed in place, so nobody is logged out by the
+        # upgrade. Raw tokens are prefixed "tok_" and hashes never are, which
+        # makes this safe to re-run.
+        rows = c.execute(
+            text("SELECT id, token FROM session_tokens WHERE token LIKE 'tok_%'")
+        ).mappings().all()
+        for row in rows:
+            c.execute(
+                text("UPDATE session_tokens SET token = :token_hash WHERE id = :id"),
+                {
+                    "token_hash": hashlib.sha256(str(row["token"]).encode("utf-8")).hexdigest(),
+                    "id": row["id"],
+                },
+            )
+
     # Future-proof: add explicit migration steps here.
     MIGRATIONS: dict[int, callable] = {
         # 1: baseline (introduced schema_migrations table)
         2: _migration_v2,
         3: _migration_v3,
+        4: _migration_v4,
     }
 
     for v in range(current + 1, target + 1):

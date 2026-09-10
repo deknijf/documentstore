@@ -12,6 +12,7 @@ data/preprocessed/*
 !data/preprocessed/.gitkeep
 mobile/android/.gradle/
 mobile/android/.gradle-local/
+/.gradle-local/
 mobile/android/.android/
 mobile/android/.android-home/
 mobile/android/.android-user/

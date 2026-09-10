@@ -10,7 +10,7 @@ from fastapi.responses import PlainTextResponse
 
 from app import legacy_main
 from app.config import settings
-from app.routers import admin, audit, auth, bank, catalog, documents, health, jobs, search, views
+from app.routers import admin, audit, auth, bank, catalog, documents, health, jobs, search, thumbnails, views
 
 
 def _split_csv_env(value: str) -> list[str]:
@@ -107,6 +107,9 @@ app.include_router(views.router)
 app.include_router(bank.router)
 app.include_router(admin.router)
 app.include_router(audit.router)
+# Serves /thumbnails/* behind a signed-URL check; must be registered before the
+# static mounts below so it wins route resolution.
+app.include_router(thumbnails.router)
 
 
 @app.get("/downloads/android-apk")
@@ -138,7 +141,8 @@ def shutdown() -> None:
 Path(settings.thumbnails_dir).mkdir(parents=True, exist_ok=True)
 Path(settings.uploads_dir).mkdir(parents=True, exist_ok=True)
 Path(settings.avatars_dir).mkdir(parents=True, exist_ok=True)
-app.mount("/thumbnails", StaticFiles(directory=settings.thumbnails_dir), name="thumbnails")
-app.mount("/uploads", StaticFiles(directory=settings.uploads_dir), name="uploads")
+# No /thumbnails or /uploads static mount: thumbnails are served by
+# routers/thumbnails.py behind a signed URL, and original uploads are only
+# reachable through /files/{document_id}, which enforces tenant access.
 app.mount("/avatars", StaticFiles(directory=settings.avatars_dir), name="avatars")
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
